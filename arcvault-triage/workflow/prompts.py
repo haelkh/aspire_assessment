@@ -5,7 +5,7 @@ This module contains the prompts used for LLM-based classification
 and enrichment of customer support messages.
 
 Design rationale and tradeoffs are documented in
-prompts/prompt_documentation.md (single source of truth).
+docs/prompt_documentation.md (single source of truth).
 """
 
 # === Classification Prompt ===

@@ -1,11 +1,24 @@
-# Prompt Documentation
+﻿# ArcVault Prompt Documentation
 
-This document explains the prompts used in the two LLM stages: classification and enrichment.
-Each stage includes the full prompt, rationale, tradeoffs, and improvement ideas.
+This document covers all LLM prompts used by the workflow and explains why each prompt is structured the way it is, what tradeoffs were made, and what would change in a future iteration.
 
-## Prompt 1 - Classification and Priority
+## 1. Prompt Scope and Model Setup
 
-### Prompt Text
+### LLM steps
+
+1. Classification (`category`, `priority`, `confidence`)
+2. Enrichment (`core_issue`, `identifiers`, `urgency_signal`, `human_summary`)
+
+### Current model configuration
+
+- Primary model: `GEMINI_MODEL` (default `gemini-2.5-flash-lite`)
+- Fallback chain: `GEMINI_FALLBACK_MODELS` (default includes `gemini-2.5-flash`, `gemini-2.0-flash`)
+- Structured response mode: `response_mime_type="application/json"`
+- Retry/backoff: configurable via `GEMINI_MAX_RETRIES`, `GEMINI_BASE_DELAY_SECONDS`, `GEMINI_MAX_JITTER_SECONDS`
+
+## 2. Prompt A: Classification
+
+### Prompt text (from `workflow/prompts.py`)
 
 ```text
 You are a support ticket classifier for ArcVault, a B2B software company.
@@ -35,19 +48,19 @@ Assign confidence:
 
 ### Examples
 
-Example 1 (Bug Report vs Incident/Outage — note the distinction):
+Example 1 (Bug Report vs Incident/Outage - note the distinction):
 MESSAGE SOURCE: Email
 MESSAGE CONTENT: I can't access my dashboard since this morning. Getting a 500 error on every page.
 {"category": "Bug Report", "priority": "High", "confidence": 0.85}
 Rationale: Single user affected with a specific error code points to Bug Report, not Incident/Outage.
 
-Example 2 (Incident/Outage — multiple users, service-level impact):
+Example 2 (Incident/Outage - multiple users, service-level impact):
 MESSAGE SOURCE: Support Portal
 MESSAGE CONTENT: Our entire team is locked out of ArcVault. None of us can reach the login page. Started 30 min ago.
 {"category": "Incident/Outage", "priority": "High", "confidence": 0.95}
 Rationale: Multiple users, complete service unavailability, time-bounded onset = Incident/Outage.
 
-Example 3 (Billing Issue — not a Feature Request even though they mention improvement):
+Example 3 (Billing Issue - not a Feature Request even though they mention improvement):
 MESSAGE SOURCE: Web Form
 MESSAGE CONTENT: We were charged $2,100 this month but our plan is $1,500. Also, it would be nice to see a billing breakdown by department.
 {"category": "Billing Issue", "priority": "High", "confidence": 0.80}
@@ -59,29 +72,32 @@ Return JSON in this exact format:
 {"category": "<category>", "priority": "<priority>", "confidence": <float>}
 ```
 
-### Why It Is Structured This Way
+### Why this structure
 
-This prompt uses a strict enum-style output and a hard JSON contract so routing logic can stay deterministic and parseable. It front-loads category definitions and priority criteria to reduce ambiguity on edge cases, and asks for calibrated confidence because confidence drives escalation decisions. The wording stays compact to reduce token cost while preserving enough context to separate similar labels such as `Bug Report` vs `Incident/Outage`.
+The prompt is designed to produce deterministic downstream routing inputs. Fixed category and priority enums minimize variance and simplify validation. The confidence field exists specifically because escalation policy depends on uncertainty (`confidence < 0.70`).
 
-**Few-shot examples** were added to resolve the most common ambiguity points: (1) single-user bug vs multi-user outage, (2) billing complaint with a secondary feature request, and (3) clarity on confidence calibration. Examples use realistic messages with brief rationale so the model understands the decision boundary, not just the answer.
+Few-shot examples are focused on known confusion cases:
 
-**Structured output mode** (`response_mime_type="application/json"`) is used at the API level to guarantee valid JSON responses, eliminating the need for markdown-stripping or regex extraction in the common case. A fallback extraction path remains for compatibility.
+- single-user bug versus multi-user outage
+- billing dispute mixed with feature language
+
+This avoids overfitting to generic examples while keeping prompt token cost controlled.
 
 ### Tradeoffs
 
-- We intentionally use fixed categories instead of open classification, which improves consistency but limits expressiveness.
-- Few-shot examples are deliberately limited to 3 to keep token cost low while covering the most impactful ambiguity points.
-- Confidence is self-reported by the model, so application-side guardrails are required (implemented in `workflow/nodes.py`).
+- Strict enums improve consistency but reduce expressiveness.
+- Confidence is model self-reporting and can drift without calibration.
+- A single-pass classifier can still struggle with mixed-intent messages.
 
-### What I Would Improve With More Time
+### What I would change with more time
 
-- Add subcategory prediction in a second pass.
-- Add confidence calibration checks against historical outcomes.
-- Add sentiment analysis for customer satisfaction signals.
+- Add a second-pass verifier prompt for borderline classifications.
+- Add a light calibration layer using historical confusion pairs.
+- Add optional intent-splitting for truly multi-topic tickets.
 
-## Prompt 2 - Enrichment and Summary
+## 3. Prompt B: Enrichment
 
-### Prompt Text
+### Prompt text (from `workflow/prompts.py`)
 
 ```text
 You are extracting structured information from a support message for a B2B software company called ArcVault.
@@ -93,14 +109,19 @@ Extract the following information and return ONLY valid JSON with no additional 
 
 1. core_issue: One clear sentence (max 20 words) summarizing the main problem or request
 2. identifiers: A list of any relevant identifiers found in the message:
-   - Account IDs or usernames
-   - Invoice numbers
-   - Error codes
-   - URLs or paths
+   - Account IDs or usernames (e.g., "jsmith", "user123")
+   - Invoice numbers (e.g., "#8821", "INV-12345")
+   - Error codes (e.g., "403", "500", "ERR_TIMEOUT")
+   - URLs or paths (e.g., "arcvault.io/user/jsmith")
    - Reference numbers
    If no identifiers found, return an empty list []
 3. urgency_signal: Briefly explain WHY this might be urgent, or "None" if not urgent
-4. human_summary: 2-3 sentences (max 100 words total) that a support team member can read quickly
+   - Consider: business impact, user impact, time sensitivity, financial impact
+4. human_summary: 2-3 sentences (max 100 words total) that a support team member can read to quickly understand:
+   - What the customer needs
+   - What context they provided
+   - What action might be needed
+   Write this as if you're briefing a colleague who will handle this ticket.
 
 ### Example
 
@@ -114,28 +135,30 @@ Return JSON in this exact format:
 {"core_issue": "<one sentence>", "identifiers": ["<id1>", "<id2>"], "urgency_signal": "<explanation or None>", "human_summary": "<2-3 sentences>"}
 ```
 
-### Why It Is Structured This Way
+### Why this structure
 
-This prompt is separated from classification to keep each model task focused: classification decides ownership and risk, enrichment extracts actionable context. The schema is intentionally minimal and practical for downstream teams, with one short issue sentence, explicit identifiers, an urgency hint, and a human-readable summary. The JSON-only requirement keeps it machine-safe, while the colleague-briefing style instruction keeps summaries useful in real support operations.
-
-A single **few-shot example** demonstrates ideal extraction density — showing how to identify error codes, account IDs, and version references within a realistic message. This helps the model calibrate the level of detail expected, particularly for the `identifiers` field where under-extraction is common without examples.
+The enrichment prompt is optimized for operational handoff quality. It separates extraction from classification so routing remains stable while enrichment can evolve independently. The fields were chosen to be immediately useful to receiving teams: concise issue statement, explicit identifiers, urgency rationale, and a readable summary.
 
 ### Tradeoffs
 
-- The schema is lean and omits richer entities (for example dates and amounts) to keep complexity low.
-- A single `core_issue` field can under-represent multi-problem messages.
-- Summary quality depends on model consistency; fallback handling in code is used when parsing fails.
+- Schema intentionally omits richer fields like dates, amounts, and affected-user counts.
+- Enrichment quality is dependent on upstream classification context.
+- Summary quality can vary; guardrail fallback text prevents hard failure.
 
-### What I Would Improve With More Time
+### What I would change with more time
 
-- Add explicit extraction of monetary amounts, dates, and impacted-user counts.
-- Add suggested next action field for the destination team.
-- Add multilingual enrichment and optional translation support.
+- Add explicit extraction for amounts, timestamps, and impacted users.
+- Add `recommended_next_action` and `required_owner_inputs` fields.
+- Add language-detection and optional translation for global support channels.
 
-## Prompt/Code Alignment
+## 4. Guardrails and Prompt Safety
 
-- Prompt output contracts are validated and sanitized in `workflow/nodes.py`.
-- **Structured output mode** at the API level guarantees valid JSON in the common case.
-- **Retry with exponential backoff** handles transient API failures (3 attempts, 1s/2s/4s with jitter).
-- Invalid enums or malformed JSON cannot break routing.
-- Low-confidence or uncertain outputs are intentionally pushed into human review.
+- Classification output is validated against strict category/priority enums and confidence range.
+- Invalid classification output raises a hard error to avoid silent misrouting.
+- Enrichment failures fall back to safe defaults to keep processing operational.
+- Routing escalation is rule-based, not prompt-only, to keep human-review triggers deterministic.
+
+## 5. Prompt Versioning Notes
+
+Prompt text lives in `workflow/prompts.py` and this document is the human-readable rationale.
+When prompt changes are made, both files should be updated together and tested against the five canonical sample inputs in `config/sample_inputs.json`.

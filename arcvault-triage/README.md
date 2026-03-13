@@ -227,17 +227,17 @@ arcvault-triage/
     smoke_live_api.py
   tests/
   docs/
-  prompts/
   output/
 ```
 
 ## Assessment Deliverables in Repo
 
 - Architecture write-up: `docs/architecture_writeup.md`
-- Prompt documentation: `prompts/prompt_documentation.md`
+- Prompt documentation: `docs/prompt_documentation.md`
 - Requirement traceability: `docs/assessment_traceability.md`
 - Demo runbook: `docs/demo_runbook.md`
 - Baseline snapshot (before/after reference): `docs/baseline_snapshot.md`
+- Submission checklist: `docs/submission_checklist.md`
 
 ## License
 
