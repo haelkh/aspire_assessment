@@ -7,7 +7,7 @@ This checklist maps each required item from the Valsoft brief to code and eviden
 | Requirement | Implementation | Evidence Artifact |
 |---|---|---|
 | Step 1: Ingestion auto-start on new message | `ingestion/webhook_api.py` (`POST /intake`) with validation, rate limiting, and optional API-key auth | `docs/demo_runbook.md` webhook demo + auth variants |
-| Step 2: Classification (category, priority, confidence) | `workflow/nodes.py` -> `classify_node` with guardrail flags and safe fallback confidence | `output/submission_records.json` (`category`, `priority`, `confidence`, `classification_guardrail_flags`) |
+| Step 2: Classification (category, priority, confidence) | `workflow/nodes.py` -> `classify_node` with strict guardrail validation and explicit classification errors | `output/submission_records.json` (`category`, `priority`, `confidence`, `confidence_level`, `confidence_source`, `classification_guardrail_flags`) |
 | Step 3: Enrichment (core issue, identifiers, urgency) | `workflow/nodes.py` -> `enrich_node` | `output/submission_records.json` |
 | Step 4: Routing to destination queue + fallback | `workflow/nodes.py` -> `route_node` with keyword, billing delta, and one-amount dispute escalation | `proposed_queue`, `destination_queue`, `escalation_rules_triggered`, `escalation_rule_evidence` |
 | Step 5: Structured JSON output + human summary | `workflow/nodes.py` -> `output_node` (append-safe JSONL + metadata); `scripts/generate_submission_artifacts.py` | `output/processed_records.jsonl`, `output/submission_records.json`, `output/submission_summary.md` |

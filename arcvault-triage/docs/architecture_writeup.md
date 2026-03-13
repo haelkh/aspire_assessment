@@ -25,7 +25,7 @@ flowchart LR
 flowchart TB
     subgraph Ingestion["Ingestion Layer"]
         W["FastAPI Webhook<br/>(POST /intake)"]
-        UI["Gradio Web UI"]
+        UI["Native Web UI<br/>(HTML/CSS/JS + FastAPI)"]
         CLI["CLI (main.py)"]
     end
 
@@ -39,7 +39,7 @@ flowchart TB
 
     subgraph AI["AI Processing Layer"]
         GEM["Gemini API<br/>structured JSON output<br/>+ retry with backoff"]
-        GUARD["Guardrails<br/>validate / coerce / fallback"]
+        GUARD["Guardrails<br/>validate / enforce / error surfacing"]
     end
 
     subgraph Persistence["Persistence Layer"]
@@ -82,7 +82,7 @@ flowchart TB
 
 3. AI Processing Layer
 - `integrations/gemini_client.py` calls Gemini with structured JSON output mode (`response_mime_type="application/json"`) and retry with exponential backoff.
-- Guardrails in `workflow/nodes.py` sanitize model outputs and expose guardrail flags in final records.
+- Guardrails in `workflow/nodes.py` strictly validate model outputs and raise explicit classification errors when output is invalid.
 
 4. Persistence Layer
 - Runtime append log: `output/processed_records.jsonl` (append-safe JSONL).
@@ -98,6 +98,7 @@ Key fields:
 - `request_id` / `external_id` for idempotency-aware intake
 - `ingestion_id`, `processing_ms`, `pipeline_version` for observability
 - `classification_guardrail_flags` for model-output validation transparency
+- `confidence_level` and `confidence_source` for confidence diagnostics in UI and persisted records
 - `escalation_rules_triggered` plus `escalation_rule_evidence` for auditability
 - `idempotent_replay` for duplicate detection visibility
 
@@ -154,8 +155,8 @@ Outputs include machine-readable rules and explicit evidence snippets.
 
 - Structured output mode enforces JSON in the common path.
 - Retry with backoff handles transient API failures.
-- Invalid category/priority values are coerced to safe defaults.
-- Classification failures force confidence to `0.0` and emit guardrail flags.
+- Invalid classification output triggers explicit guardrail errors.
+- Classification failures are surfaced to API/UI instead of silently coercing category/priority/confidence values.
 - Enrichment failures return safe fallback fields instead of throwing exceptions.
 
 ### Storage Robustness

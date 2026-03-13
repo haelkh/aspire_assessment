@@ -13,6 +13,8 @@ def _fake_result(message: str, source: str, metadata: dict | None = None) -> dic
         "category": "Bug Report",
         "priority": "High",
         "confidence": 0.91,
+        "confidence_level": "High",
+        "confidence_source": "model",
         "classification_guardrail_flags": [],
         "proposed_queue": "Engineering",
         "destination_queue": "Engineering",
@@ -135,6 +137,8 @@ def test_intake_accepts_valid_api_key_when_enforced(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["category"] == "Bug Report"
+    assert response.json()["confidence_level"] == "High"
+    assert response.json()["confidence_source"] == "model"
 
 
 def test_intake_invalid_source_returns_validation_error() -> None:

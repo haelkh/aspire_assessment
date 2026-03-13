@@ -8,7 +8,8 @@ Built for the Valsoft AI Engineer assessment using free/open-source tooling.
 - Automatic ingestion via webhook (`POST /intake`) with rate limiting
 - Optional webhook authentication (`X-API-Key`) when `INTAKE_API_KEY` is configured
 - LLM classification into required categories and priority (with few-shot examples)
-- Confidence scoring with guarded parsing and fallback behavior
+- Confidence scoring with strict guardrail validation and explicit classification errors
+- Confidence metadata on successful classifications (`confidence_level`, `confidence_source`)
 - Enrichment (core issue, identifiers, urgency signal, team-ready summary)
 - Routing with `proposed_queue` and final `destination_queue`
 - Escalation to a separate queue (`Human Review`) for low-confidence or rule-based cases
@@ -36,7 +37,7 @@ Escalation rules:
 | **`proposed_queue` + `destination_queue`** | Separates classification intent from final routing. Escalated records still show which team *should* own them (`proposed_queue`), while `destination_queue` reflects that they need human review first. |
 | **Escalation rule composition** | Multiple independent rules (confidence, keywords, billing delta) are evaluated and accumulated. All triggered rules are recorded in machine-readable and human-readable formats for audit and debugging. |
 | **Word-boundary keyword matching** | Uses `\b` regex boundaries instead of substring `in` to prevent false positives (e.g., "I'm down for that" matching "down"). |
-| **Gemini structured output mode** | `response_mime_type="application/json"` guarantees valid JSON at the API level, with a fallback extraction path for compatibility. |
+| **Gemini structured output mode** | `response_mime_type="application/json"` increases JSON reliability, with strict guardrails that surface model failures instead of silently coercing invalid output. |
 | **Retry with exponential backoff** | 3 attempts with 1s/2s/4s delays + jitter for resilience against transient Gemini API failures. |
 | **Persistent idempotency** | SQLite-backed deduplication survives restarts and prioritizes caller-provided `request_id` when available. |
 | **Append-safe output** | Runtime records are persisted as JSONL (`output/processed_records.jsonl`) to avoid read-modify-write race risks. |
@@ -48,7 +49,7 @@ Escalation rules:
 - LangGraph
 - Gemini API (`google-generativeai`)
 - FastAPI (webhook ingestion)
-- Gradio (demo UI)
+- Native HTML/CSS/JS UI served by FastAPI
 - Google Sheets (`gspread`) optional
 
 ## Quick Start
@@ -84,7 +85,7 @@ Optional:
 
 ### 3. Run
 
-Gradio demo UI:
+Native web UI:
 
 ```bash
 python app.py
@@ -185,6 +186,8 @@ Recommended headers:
 - Category
 - Priority
 - Confidence
+- Confidence Level
+- Confidence Source
 - Guardrail Flags
 - Core Issue
 - Identifiers

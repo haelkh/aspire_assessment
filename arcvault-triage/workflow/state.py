@@ -68,6 +68,12 @@ class TriageState(TypedDict, total=False):
     Values below 0.70 trigger human escalation.
     """
 
+    confidence_level: str
+    """Human-readable confidence level: Low, Medium, or High."""
+
+    confidence_source: str
+    """Confidence origin marker. Current value: model."""
+
     classification_guardrail_flags: list[str]
     """Validation and parsing guardrail flags captured during classification."""
 
@@ -86,6 +92,9 @@ class TriageState(TypedDict, total=False):
     2-3 sentence summary for the receiving team.
     Should explain the issue in plain language.
     """
+
+    enrichment_guardrail_flags: list[str]
+    """Validation and parsing guardrail flags captured during enrichment."""
 
     # === Routing Fields ===
     destination_queue: str

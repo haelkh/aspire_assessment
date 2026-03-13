@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 from datetime import datetime
@@ -30,6 +31,8 @@ from workflow.state import TriageState
 
 DEFAULT_CATEGORY = "Technical Question"
 DEFAULT_PRIORITY = "Medium"
+CONFIDENCE_HIGH_THRESHOLD = 0.85
+CONFIDENCE_MEDIUM_THRESHOLD = 0.70
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -51,7 +54,40 @@ def _normalize_confidence(value: Any, default: float = 0.5) -> float:
     elif not isinstance(confidence, (int, float)):
         confidence = default
 
+    if not math.isfinite(float(confidence)):
+        confidence = default
+
     return max(0.0, min(1.0, float(confidence)))
+
+
+def _parse_confidence(value: Any) -> float | None:
+    """Parse confidence and enforce strict [0.0, 1.0] validation."""
+    confidence = value
+    if isinstance(confidence, str):
+        confidence = confidence.strip()
+        try:
+            confidence = float(confidence)
+        except ValueError:
+            return None
+    elif isinstance(confidence, (int, float)):
+        confidence = float(confidence)
+    else:
+        return None
+
+    if not math.isfinite(confidence):
+        return None
+    if confidence < 0.0 or confidence > 1.0:
+        return None
+    return float(confidence)
+
+
+def _confidence_level(confidence: float) -> str:
+    """Map confidence score to a display level."""
+    if confidence >= CONFIDENCE_HIGH_THRESHOLD:
+        return "High"
+    if confidence >= CONFIDENCE_MEDIUM_THRESHOLD:
+        return "Medium"
+    return "Low"
 
 
 def _canonicalize_message(message: str) -> str:
@@ -174,38 +210,66 @@ def classify_node(state: TriageState) -> Dict[str, Any]:
         result = client.generate_json(prompt)
     except Exception as exc:  # pragma: no cover - integration behavior
         result = {}
-        classification_errors.append(f"classification_error:{exc.__class__.__name__}")
+        error_details = str(exc).strip().replace(",", ";").replace("\n", " ")
+        if error_details:
+            error_details = error_details[:220]
+            classification_errors.append(
+                f"classification_error:{exc.__class__.__name__}:{error_details}"
+            )
+        else:
+            classification_errors.append(f"classification_error:{exc.__class__.__name__}")
 
     if not isinstance(result, dict):
         result = {}
         classification_errors.append("classification_error:non_dict_response")
 
-    category = result.get("category", DEFAULT_CATEGORY)
-    if category not in CATEGORIES:
-        classification_errors.append(f"invalid_category:{category}")
-        category = DEFAULT_CATEGORY
-
-    priority = result.get("priority", DEFAULT_PRIORITY)
-    if priority not in PRIORITIES:
-        classification_errors.append(f"invalid_priority:{priority}")
-        priority = DEFAULT_PRIORITY
-
-    confidence = _normalize_confidence(result.get("confidence", 0.5), default=0.5)
-
-    # Any validation failure forces escalation-safe confidence.
-    if classification_errors:
-        confidence = 0.0
+    if any(flag.startswith("classification_error:") for flag in classification_errors):
         _log_event(
             logging.WARNING,
             "classification_guardrail_triggered",
             ingestion_id=state.get("ingestion_id"),
             flags=classification_errors,
+            raw_result=result,
+        )
+        raise RuntimeError(
+            "Classification failed guardrails: " + ", ".join(classification_errors)
+        )
+
+    category = result.get("category")
+
+    # Normalize category (e.g., Incident -> Incident/Outage)
+    if category == "Incident":
+        category = "Incident/Outage"
+
+    if category not in CATEGORIES:
+        classification_errors.append(f"invalid_category:{category}")
+
+    priority = result.get("priority")
+    if priority not in PRIORITIES:
+        classification_errors.append(f"invalid_priority:{priority}")
+
+    confidence = _parse_confidence(result.get("confidence"))
+    if confidence is None:
+        classification_errors.append(f"invalid_confidence:{result.get('confidence')}")
+
+    if classification_errors:
+        _log_event(
+            logging.WARNING,
+            "classification_guardrail_triggered",
+            ingestion_id=state.get("ingestion_id"),
+            flags=classification_errors,
+            raw_result=result,
+        )
+        raise RuntimeError(
+            "Classification failed guardrails: " + ", ".join(classification_errors)
         )
 
     return {
         "category": category,
         "priority": priority,
-        "confidence": confidence,
+        "confidence": float(confidence),
+        "confidence_level": _confidence_level(float(confidence)),
+        "confidence_source": "model",
         "classification_guardrail_flags": classification_errors,
     }
 
@@ -225,13 +289,17 @@ def enrich_node(state: TriageState) -> Dict[str, Any]:
         priority=state["priority"],
     )
 
+    enrichment_errors: List[str] = []
+
     try:
         result = client.generate_json(prompt)
-    except Exception:  # pragma: no cover - integration behavior
+    except Exception as exc:  # pragma: no cover - integration behavior
         result = {}
+        enrichment_errors.append(f"enrichment_error:{exc.__class__.__name__}")
 
     if not isinstance(result, dict):
         result = {}
+        enrichment_errors.append("enrichment_error:non_dict_response")
 
     core_issue = str(
         result.get("core_issue")
@@ -262,6 +330,7 @@ def enrich_node(state: TriageState) -> Dict[str, Any]:
         "identifiers": normalized_identifiers,
         "urgency_signal": urgency_signal,
         "human_summary": human_summary,
+        "enrichment_guardrail_flags": enrichment_errors,
     }
 
 
@@ -403,8 +472,14 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         "message": state.get("message", ""),
         "category": state.get("category", ""),
         "priority": state.get("priority", ""),
-        "confidence": state.get("confidence", 0.0),
+        "confidence": _normalize_confidence(state.get("confidence", 0.0), default=0.0),
+        "confidence_level": state.get("confidence_level")
+        or _confidence_level(
+            _normalize_confidence(state.get("confidence", 0.0), default=0.0)
+        ),
+        "confidence_source": state.get("confidence_source", "model"),
         "classification_guardrail_flags": state.get("classification_guardrail_flags", []),
+        "enrichment_guardrail_flags": state.get("enrichment_guardrail_flags", []),
         "core_issue": state.get("core_issue", ""),
         "identifiers": state.get("identifiers", []),
         "urgency_signal": state.get("urgency_signal", ""),

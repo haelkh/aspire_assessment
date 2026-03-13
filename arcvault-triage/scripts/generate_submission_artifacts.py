@@ -50,6 +50,8 @@ def build_submission_record(sample: Dict[str, Any], result: Dict[str, Any]) -> D
         "category": result.get("category"),
         "priority": result.get("priority"),
         "confidence": result.get("confidence"),
+        "confidence_level": result.get("confidence_level"),
+        "confidence_source": result.get("confidence_source"),
         "classification_guardrail_flags": result.get("classification_guardrail_flags", []),
         "core_issue": result.get("core_issue"),
         "identifiers": result.get("identifiers", []),

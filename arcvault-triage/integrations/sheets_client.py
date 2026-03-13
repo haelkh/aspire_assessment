@@ -38,6 +38,8 @@ class SheetsClient:
         "Category",
         "Priority",
         "Confidence",
+        "Confidence Level",
+        "Confidence Source",
         "Guardrail Flags",
         "Core Issue",
         "Identifiers",
@@ -87,6 +89,93 @@ class SheetsClient:
 
         self._client = None
         self._sheet = None
+        self._headers_ready = False
+
+    @staticmethod
+    def _column_letter(index: int) -> str:
+        """Convert a 1-based column index to A1-style column letters."""
+        if index < 1:
+            raise ValueError("Column index must be >= 1")
+
+        letters: List[str] = []
+        value = index
+        while value > 0:
+            value, remainder = divmod(value - 1, 26)
+            letters.append(chr(65 + remainder))
+        return "".join(reversed(letters))
+
+    def _header_range(self) -> str:
+        end_col = self._column_letter(len(self.HEADERS))
+        return f"A1:{end_col}1"
+
+    def _row_range(self, row_number: int) -> str:
+        end_col = self._column_letter(len(self.HEADERS))
+        return f"A{row_number}:{end_col}{row_number}"
+
+    def _rows_range(self, start_row: int, end_row: int) -> str:
+        end_col = self._column_letter(len(self.HEADERS))
+        return f"A{start_row}:{end_col}{end_row}"
+
+    def _trim_or_pad_headers(self, headers: List[str]) -> List[str]:
+        expected_len = len(self.HEADERS)
+        normalized = [str(value).strip() for value in headers]
+
+        if len(normalized) < expected_len:
+            normalized.extend([""] * (expected_len - len(normalized)))
+
+        return normalized[:expected_len]
+
+    def _ensure_headers(self) -> None:
+        """
+        Ensure row 1 contains the exact expected headers in columns A..AA.
+
+        Behavior:
+        - If row 1 is empty in A..AA, write headers automatically.
+        - If row 1 differs from expected headers, fail loudly.
+        """
+        if self._headers_ready:
+            return
+
+        expected_headers = [header.strip() for header in self.HEADERS]
+        existing_headers = self._trim_or_pad_headers(self._sheet.row_values(1))
+
+        if all(value == "" for value in existing_headers):
+            self._sheet.update(
+                range_name=self._header_range(),
+                values=[expected_headers],
+                value_input_option="RAW",
+            )
+            self._headers_ready = True
+            return
+
+        if existing_headers != expected_headers:
+            mismatches: List[str] = []
+            for index, (expected, actual) in enumerate(
+                zip(expected_headers, existing_headers),
+                start=1,
+            ):
+                if expected != actual:
+                    mismatches.append(
+                        f"col {index}: expected '{expected}', found '{actual or '<empty>'}'"
+                    )
+                if len(mismatches) >= 5:
+                    break
+
+            mismatch_summary = "; ".join(mismatches) if mismatches else "unknown mismatch"
+            raise ValueError(
+                "Google Sheets headers mismatch in row 1. "
+                f"Expected range {self._header_range()} to match configured headers. "
+                f"First mismatches: {mismatch_summary}"
+            )
+
+        self._headers_ready = True
+
+    def _next_row_number(self) -> int:
+        """Return the next writable row index after existing data."""
+        all_values = self._sheet.get_all_values()
+        if not all_values:
+            return 2
+        return len(all_values) + 1
 
     def _connect(self):
         """Establish connection to Google Sheets."""
@@ -116,6 +205,7 @@ class SheetsClient:
 
             self._client = gspread.authorize(credentials)
             self._sheet = self._client.open_by_key(self.spreadsheet_id).sheet1
+            self._headers_ready = False
 
         except ImportError:
             raise ImportError(
@@ -137,13 +227,24 @@ class SheetsClient:
             ValueError: If required fields are missing.
         """
         self._connect()
+        self._ensure_headers()
 
         # Format the record as a row
         row = self._format_row(record)
+        if len(row) != len(self.HEADERS):
+            raise ValueError(
+                "Row length mismatch for Google Sheets write. "
+                f"Expected {len(self.HEADERS)} columns, got {len(row)}."
+            )
 
-        # Append to sheet
-        self._sheet.append_row(row)
-        return len(self._sheet.get_all_records()) + 1
+        # Write to an explicit range to prevent table-detection column drift.
+        row_number = self._next_row_number()
+        self._sheet.update(
+            range_name=self._row_range(row_number),
+            values=[row],
+            value_input_option="RAW",
+        )
+        return row_number
 
     def append_records(self, records: List[Dict[str, Any]]) -> int:
         """
@@ -156,9 +257,26 @@ class SheetsClient:
             The number of records appended.
         """
         self._connect()
+        self._ensure_headers()
 
         rows = [self._format_row(record) for record in records]
-        self._sheet.append_rows(rows)
+        if not rows:
+            return 0
+
+        for row in rows:
+            if len(row) != len(self.HEADERS):
+                raise ValueError(
+                    "Row length mismatch for Google Sheets batch write. "
+                    f"Expected {len(self.HEADERS)} columns, got {len(row)}."
+                )
+
+        start_row = self._next_row_number()
+        end_row = start_row + len(rows) - 1
+        self._sheet.update(
+            range_name=self._rows_range(start_row, end_row),
+            values=rows,
+            value_input_option="RAW",
+        )
         return len(records)
 
     def _format_row(self, record: Dict[str, Any]) -> List[str]:
@@ -198,6 +316,8 @@ class SheetsClient:
             record.get("category", ""),
             record.get("priority", ""),
             f"{record.get('confidence', 0):.2f}",
+            record.get("confidence_level", ""),
+            record.get("confidence_source", ""),
             ", ".join(record.get("classification_guardrail_flags", [])),
             record.get("core_issue", ""),
             identifiers,

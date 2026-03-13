@@ -136,7 +136,9 @@ def intake(payload: IntakeRequest, request: Request) -> dict:
     try:
         result = process_message(payload.message, payload.source, metadata=metadata)
     except Exception as exc:  # pragma: no cover - integration behavior
-        raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
+        detail = str(exc) or "Processing failed."
+        status_code = 502 if "Classification failed guardrails" in detail else 500
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
     result["ingestion_id"] = ingestion_id
     result["request_id"] = request_id

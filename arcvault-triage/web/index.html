@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ArcVault Triage Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-grid"></div>
+
+    <main class="app-shell">
+      <header class="hero card animate-rise">
+        <p class="eyebrow">ArcVault Operations Console</p>
+        <h1>Inbound Support Triage</h1>
+        <p class="hero-copy">
+          Native intake workspace for structured requests, reliable routing, and auditable
+          escalation decisions.
+        </p>
+        <div class="hero-pill-row">
+          <span class="pill">Input Contract</span>
+          <span class="pill">Replay Safety</span>
+          <span class="pill">Escalation Evidence</span>
+          <span class="pill">Confidence Transparency</span>
+        </div>
+      </header>
+
+      <nav class="tabs animate-rise delay-1" aria-label="Console views">
+        <button id="tab-intake" class="tab active" type="button">Intake</button>
+        <button id="tab-batch" class="tab" type="button">Batch QA</button>
+      </nav>
+
+      <section id="view-intake" class="view active animate-rise delay-2">
+        <div class="workspace-grid">
+          <section class="card pane pane-input">
+            <div class="pane-header">
+              <h2>Request Input</h2>
+              <p>Choose source, load a realistic sample, and submit for triage.</p>
+            </div>
+
+            <form id="triage-form" class="form-stack">
+              <div class="field-group">
+                <label for="source">Source</label>
+                <select id="source" name="source">
+                  <option>Email</option>
+                  <option>Web Form</option>
+                  <option>Support Portal</option>
+                </select>
+              </div>
+
+              <div class="field-group">
+                <label for="message">Message</label>
+                <textarea
+                  id="message"
+                  name="message"
+                  rows="8"
+                  placeholder="Paste inbound customer request..."
+                ></textarea>
+              </div>
+
+              <details class="meta-panel">
+                <summary>Operational Metadata</summary>
+                <div class="meta-grid">
+                  <div class="field-group">
+                    <label for="request-id">Request ID</label>
+                    <input id="request-id" type="text" placeholder="REQ-1001" />
+                  </div>
+                  <div class="field-group">
+                    <label for="external-id">External ID</label>
+                    <input id="external-id" type="text" placeholder="MAIL-THREAD-123" />
+                  </div>
+                  <div class="field-group">
+                    <label for="customer-id">Customer ID</label>
+                    <input id="customer-id" type="text" placeholder="acme-corp" />
+                  </div>
+                  <div class="field-group">
+                    <label for="received-at">Received At (ISO-8601)</label>
+                    <input
+                      id="received-at"
+                      type="text"
+                      placeholder="2026-02-10T09:12:00-05:00"
+                    />
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label for="channel-metadata">Channel Metadata (JSON)</label>
+                  <textarea
+                    id="channel-metadata"
+                    rows="4"
+                    placeholder='{"mailbox":"support@arcvault.io","priority_flag":"normal"}'
+                  ></textarea>
+                </div>
+              </details>
+
+              <div class="action-row">
+                <button id="btn-process" class="btn btn-primary" type="submit">
+                  Process Request
+                </button>
+                <button id="btn-clear" class="btn btn-ghost" type="button">Clear</button>
+              </div>
+            </form>
+
+            <section class="sample-section">
+              <div class="sample-header-row">
+                <h3>Sample Inputs</h3>
+                <p>Formatted by channel, not plain strings.</p>
+              </div>
+              <div id="sample-buttons" class="sample-buttons"></div>
+              <div id="sample-preview" class="sample-preview"></div>
+            </section>
+          </section>
+
+          <section class="card pane pane-output">
+            <div class="pane-header">
+              <h2>Decision Output</h2>
+              <p>Category, routing, escalation evidence, and confidence diagnostics.</p>
+            </div>
+
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span class="metric-label">Category</span>
+                <span id="metric-category" class="metric-value">-</span>
+              </article>
+              <article class="metric-card">
+                <span class="metric-label">Priority</span>
+                <span id="metric-priority" class="metric-value">-</span>
+              </article>
+              <article class="metric-card">
+                <span class="metric-label">Final Queue</span>
+                <span id="metric-queue" class="metric-value">-</span>
+              </article>
+              <article class="metric-card">
+                <span class="metric-label">Confidence</span>
+                <span id="metric-confidence" class="metric-value">-</span>
+                <div class="confidence-meta">
+                  <span id="metric-confidence-level" class="confidence-badge neutral">-</span>
+                  <span id="metric-confidence-source" class="confidence-source">-</span>
+                </div>
+                <div class="confidence-track">
+                  <div id="confidence-bar" class="confidence-bar"></div>
+                </div>
+              </article>
+            </div>
+
+            <div id="escalation-banner" class="escalation-banner hidden">
+              <strong>Escalated:</strong> <span id="escalation-reason">-</span>
+            </div>
+
+            <div id="error-banner" class="error-banner hidden">
+              <strong>Error:</strong> <span id="error-reason">-</span>
+            </div>
+
+            <article class="result-card">
+              <h3>Operator Summary</h3>
+              <p id="summary-text">Submit a request to see a human-readable summary.</p>
+            </article>
+
+            <article class="result-card">
+              <h3>Escalation Rules Triggered</h3>
+              <div id="rules-list" class="chip-list"></div>
+            </article>
+
+            <article class="result-card">
+              <h3>Rule Evidence</h3>
+              <ul id="evidence-list" class="evidence-list"></ul>
+            </article>
+
+            <article id="ai-alerts-card" class="result-card hidden">
+              <h3>AI System Alerts</h3>
+              <div id="ai-alerts-list" class="chip-list"></div>
+            </article>
+
+            <article class="result-card">
+              <h3>Structured Record</h3>
+              <pre id="json-output" class="json-output">{}</pre>
+            </article>
+
+            <p id="status-line" class="status-line">Ready.</p>
+          </section>
+        </div>
+      </section>
+
+      <section id="view-batch" class="view animate-rise delay-2">
+        <div class="card batch-pane">
+          <div class="pane-header">
+            <h2>Batch QA</h2>
+            <p>Run all configured samples to verify routing and escalation consistency.</p>
+          </div>
+
+          <div class="action-row">
+            <button id="btn-batch" class="btn btn-primary" type="button">
+              Run Batch (All Samples)
+            </button>
+          </div>
+
+          <div class="table-wrap">
+            <table id="batch-table">
+              <thead>
+                <tr>
+                  <th>Sample</th>
+                  <th>Source</th>
+                  <th>Category</th>
+                  <th>Priority</th>
+                  <th>Confidence</th>
+                  <th>Queue</th>
+                  <th>Escalated</th>
+                  <th>Replay</th>
+                </tr>
+              </thead>
+              <tbody id="batch-body">
+                <tr>
+                  <td colspan="8" class="muted-row">No batch run yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

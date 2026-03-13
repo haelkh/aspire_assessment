@@ -40,6 +40,8 @@ def print_result(result: Dict[str, Any]) -> None:
     print(f"Category:          {result.get('category', 'N/A')}")
     print(f"Priority:          {result.get('priority', 'N/A')}")
     print(f"Confidence:        {result.get('confidence', 0):.2%}")
+    print(f"Confidence Level:  {result.get('confidence_level', 'N/A')}")
+    print(f"Confidence Source: {result.get('confidence_source', 'N/A')}")
     print(f"Guardrail Flags:   {', '.join(result.get('classification_guardrail_flags', [])) or 'None'}")
     print(f"Proposed Queue:    {result.get('proposed_queue', 'N/A')}")
     print(f"Final Queue:       {result.get('destination_queue', 'N/A')}")

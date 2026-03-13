@@ -20,7 +20,7 @@ Terminal A: start webhook API:
 uvicorn ingestion.webhook_api:app --host 127.0.0.1 --port 8000
 ```
 
-Terminal B: start Gradio UI:
+Terminal B: start native web UI:
 
 ```bash
 python app.py
@@ -28,7 +28,7 @@ python app.py
 
 ### What to say
 
-> "I built three ingestion modes: a FastAPI webhook that auto-triggers on POST, a Gradio web UI for interactive use, and a CLI for batch processing."
+> "I built three ingestion modes: a FastAPI webhook that auto-triggers on POST, a native web UI for interactive use, and a CLI for batch processing."
 
 ## 2. Show ingestion trigger (60 seconds)
 
@@ -68,7 +68,7 @@ Use CLI:
 python main.py all
 ```
 
-Or use the Gradio UI and click "Process All Samples".
+Or use the web UI and click "Run Batch (All Samples)".
 
 ### What to say (walk through each result)
 

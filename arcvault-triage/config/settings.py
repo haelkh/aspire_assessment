@@ -8,7 +8,8 @@ QUEUE_MAPPING = {
     "Feature Request": "Product",
     "Billing Issue": "Billing",
     "Technical Question": "IT/Security",
-    "Incident/Outage": "Engineering"
+    "Incident/Outage": "Engineering",
+    "Incident": "Engineering"
 }
 
 # Destination used when any escalation rule is triggered.
@@ -55,7 +56,8 @@ CATEGORIES = [
     "Feature Request",
     "Billing Issue",
     "Technical Question",
-    "Incident/Outage"
+    "Incident/Outage",
+    "Incident"
 ]
 
 PRIORITIES = [

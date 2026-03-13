@@ -25,6 +25,7 @@ load_dotenv()
 MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 1.0
 MAX_JITTER_SECONDS = 0.5
+DEFAULT_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 
 class GeminiClient:
@@ -53,12 +54,24 @@ class GeminiClient:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            # Default to a low-cost fast model.
-            # Can be overridden with GEMINI_MODEL env var.
-            model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-            self.model = genai.GenerativeModel(model_name)
             self._genai = genai
-            self._model_name = model_name
+            configured_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+            fallback_env = os.getenv("GEMINI_FALLBACK_MODELS", "")
+            fallback_models = [
+                item.strip()
+                for item in fallback_env.split(",")
+                if item.strip()
+            ] or DEFAULT_FALLBACK_MODELS
+
+            # Keep configured model first, then distinct Gemini fallback models.
+            self._model_candidates = [configured_model] + [
+                model_name
+                for model_name in fallback_models
+                if model_name != configured_model
+            ]
+            self._model_index = 0
+            self._model_name = self._model_candidates[self._model_index]
+            self.model = genai.GenerativeModel(self._model_name)
         except ImportError:
             raise ImportError(
                 "google-generativeai package is required. "
@@ -85,11 +98,55 @@ class GeminiClient:
                 return fn()
             except Exception as exc:
                 last_exception = exc
+                if self._switch_model_on_quota_error(exc):
+                    continue
                 if attempt < retries - 1:
-                    delay = BASE_DELAY_SECONDS * (2 ** attempt)
+                    delay = max(
+                        BASE_DELAY_SECONDS * (2 ** attempt),
+                        self._extract_retry_delay_seconds(exc),
+                    )
                     jitter = random.uniform(0, MAX_JITTER_SECONDS)
                     time.sleep(delay + jitter)
         raise last_exception
+
+    def _is_quota_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return (
+            "429" in text
+            or "quota" in text
+            or "rate limit" in text
+            or "resource_exhausted" in text
+        )
+
+    def _extract_retry_delay_seconds(self, exc: Exception) -> float:
+        """Extract suggested retry delay from Gemini error text when available."""
+        message = str(exc)
+        retry_match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", message, re.IGNORECASE)
+        if retry_match:
+            try:
+                return float(retry_match.group(1))
+            except ValueError:
+                return 0.0
+
+        block_match = re.search(r"retry_delay\s*\{[^}]*seconds:\s*([0-9]+)", message)
+        if block_match:
+            try:
+                return float(block_match.group(1))
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    def _switch_model_on_quota_error(self, exc: Exception) -> bool:
+        """Switch to next configured Gemini model when current model is quota-limited."""
+        if not self._is_quota_error(exc):
+            return False
+        if self._model_index >= len(self._model_candidates) - 1:
+            return False
+
+        self._model_index += 1
+        self._model_name = self._model_candidates[self._model_index]
+        self.model = self._genai.GenerativeModel(self._model_name)
+        return True
 
     def generate(self, prompt: str, max_tokens: int = 1024) -> str:
         """
@@ -115,7 +172,10 @@ class GeminiClient:
         try:
             return self._retry_with_backoff(_call)
         except Exception as e:
-            raise RuntimeError(f"Gemini API error after {MAX_RETRIES} attempts: {str(e)}")
+            raise RuntimeError(
+                f"Gemini API error after {MAX_RETRIES} attempts on model "
+                f"'{self._model_name}': {str(e)}"
+            )
 
     def generate_json(self, prompt: str, max_tokens: int = 1024) -> dict:
         """

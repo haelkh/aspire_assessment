@@ -24,6 +24,8 @@ def _fake_process_message(message: str, source: str) -> dict:  # noqa: ARG001
         "category": "Technical Question",
         "priority": "Medium",
         "confidence": 0.88,
+        "confidence_level": "High",
+        "confidence_source": "model",
         "classification_guardrail_flags": [],
         "core_issue": "Question about product behavior.",
         "identifiers": [],
@@ -60,3 +62,5 @@ def test_submission_artifacts_generate_five_sorted_records(
     records = json.loads(submission_json.read_text(encoding="utf-8"))
     assert len(records) == 5
     assert [record["sample_id"] for record in records] == [1, 2, 3, 4, 5]
+    assert all("confidence_level" in record for record in records)
+    assert all("confidence_source" in record for record in records)

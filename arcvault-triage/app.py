@@ -1,219 +1,210 @@
 """
-ArcVault Support Triage System - Gradio Web Interface.
+ArcVault Support Triage System - Native web interface.
 
-This module provides a web-based UI for the triage system using Gradio.
-Run this file to start the web interface.
+This module serves a FastAPI app that exposes:
+- A browser UI built with plain HTML/CSS/JS
+- JSON APIs for single-message triage and batch sample processing
 """
 
+from __future__ import annotations
+
 import json
+import logging
 import os
-from typing import Any, Dict, List, Tuple
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional
 
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
 
-# Load environment variables FIRST, before importing any LangChain/LangGraph modules
+# Load environment variables before importing workflow modules.
 load_dotenv()
-
-import gradio as gr
 
 from workflow.graph import process_message
 
 
-def load_samples() -> List[Dict[str, Any]]:
-    """Load sample inputs from JSON file."""
-    config_path = os.path.join(os.path.dirname(__file__), "config", "sample_inputs.json")
-    with open(config_path, "r", encoding="utf-8") as file_handle:
+logger = logging.getLogger(__name__)
+
+ROOT_DIR = Path(__file__).resolve().parent
+WEB_DIR = ROOT_DIR / "web"
+SAMPLES_PATH = ROOT_DIR / "config" / "sample_inputs.json"
+
+ALLOWED_SOURCES = ("Email", "Web Form", "Support Portal")
+
+
+def load_samples() -> list[Dict[str, Any]]:
+    """Load sample payloads used by the UI for prefill and batch QA."""
+    if not SAMPLES_PATH.exists():
+        return []
+    with SAMPLES_PATH.open("r", encoding="utf-8") as file_handle:
         return json.load(file_handle)
 
 
 SAMPLES = load_samples()
 
 
-def process_single_message(source: str, message: str) -> Tuple[Dict[str, Any], str]:
-    """
-    Process a single message through the triage workflow.
-
-    Returns:
-        Tuple of (results_dict, status_message).
-    """
-    if not message or not message.strip():
-        return {}, "Please enter a message to process."
-
-    if not source:
-        return {}, "Please select a message source."
-
-    try:
-        result = process_message(message, source)
-
-        display_result = {
-            "Category": result.get("category", "Unknown"),
-            "Priority": result.get("priority", "Unknown"),
-            "Confidence": f"{result.get('confidence', 0):.2%}",
-            "Guardrail Flags": result.get("classification_guardrail_flags", []),
-            "Proposed Queue": result.get("proposed_queue", "Unknown"),
-            "Final Queue": result.get("destination_queue", "Unknown"),
-            "Escalation": "YES" if result.get("escalation_flag") else "NO",
-            "Escalation Rules": result.get("escalation_rules_triggered", []),
-            "Escalation Evidence": result.get("escalation_rule_evidence", []),
-            "Escalation Reason": result.get("escalation_reason") or "N/A",
-            "Core Issue": result.get("core_issue", "N/A"),
-            "Identifiers": ", ".join(result.get("identifiers", [])) or "None found",
-            "Urgency Signal": result.get("urgency_signal", "None"),
-            "Summary": result.get("human_summary", "N/A"),
-            "Timestamp": result.get("timestamp", "N/A"),
-            "Ingestion ID": result.get("ingestion_id", "N/A"),
-            "Pipeline Version": result.get("pipeline_version", "N/A"),
-            "Processing (ms)": result.get("processing_ms", 0.0),
-            "Idempotent Replay": result.get("idempotent_replay", False),
-        }
-
-        status = "Message processed successfully."
-        if result.get("escalation_flag"):
-            status = "Message processed and routed to Human Review."
-
-        return display_result, status
-
-    except Exception as exc:  # pragma: no cover - integration behavior
-        return {}, f"Error processing message: {exc}"
+def _strip_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
-def load_sample(sample_id: int) -> Tuple[str, str]:
-    """Load a sample message into the form."""
-    if 1 <= sample_id <= len(SAMPLES):
-        sample = SAMPLES[sample_id - 1]
-        return sample["source"], sample["message"]
-    return "", ""
+class TriageRequest(BaseModel):
+    """Request payload accepted by the local UI API."""
 
+    source: Literal["Email", "Web Form", "Support Portal"]
+    message: str = Field(min_length=1, max_length=5000)
+    request_id: Optional[str] = Field(default=None, max_length=128)
+    external_id: Optional[str] = Field(default=None, max_length=128)
+    customer_id: Optional[str] = Field(default=None, max_length=128)
+    received_at: Optional[str] = None
+    channel_metadata: Optional[Dict[str, Any]] = None
 
-def batch_process_all() -> Tuple[str, str]:
-    """Process all sample messages and return a formatted markdown summary."""
-    lines = ["## Batch Results\n"]
+    @field_validator("message")
+    @classmethod
+    def _validate_message(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("message must not be blank")
+        return text
 
-    for index, sample in enumerate(SAMPLES, 1):
+    @field_validator("request_id", "external_id", "customer_id")
+    @classmethod
+    def _validate_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        return _strip_optional_text(value)
+
+    @field_validator("received_at")
+    @classmethod
+    def _validate_received_at(cls, value: Optional[str]) -> Optional[str]:
+        value = _strip_optional_text(value)
+        if value is None:
+            return None
         try:
-            result = process_message(sample["message"], sample["source"])
-            escalation = "🚨 YES" if result.get("escalation_flag") else "✅ NO"
-            lines.append(
-                f"### Sample {index} ({sample['source']})\n"
-                f"| Field | Value |\n"
-                f"|---|---|\n"
-                f"| Category | {result.get('category')} |\n"
-                f"| Priority | {result.get('priority')} |\n"
-                f"| Confidence | {result.get('confidence', 0):.2%} |\n"
-                f"| Proposed Queue | {result.get('proposed_queue')} |\n"
-                f"| Final Queue | {result.get('destination_queue')} |\n"
-                f"| Escalation | {escalation} |\n"
-                f"| Core Issue | {result.get('core_issue')} |\n"
-                f"| Summary | {result.get('human_summary')} |\n"
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("received_at must be ISO-8601") from exc
+        return value
+
+
+app = FastAPI(title="ArcVault Triage Console", version="1.2.0")
+if WEB_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+
+
+def _build_metadata(payload: TriageRequest) -> Dict[str, Any]:
+    return {
+        "request_id": payload.request_id or payload.external_id,
+        "external_id": payload.external_id,
+        "customer_id": payload.customer_id,
+        "received_at": payload.received_at,
+        "channel_metadata": payload.channel_metadata,
+    }
+
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """Basic health endpoint for local checks."""
+    return {"status": "ok"}
+
+
+@app.get("/")
+def index() -> FileResponse:
+    """Serve the web UI."""
+    index_path = WEB_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=500, detail="UI assets are missing.")
+    return FileResponse(index_path)
+
+
+@app.get("/api/samples")
+def get_samples() -> Dict[str, Any]:
+    """Return demo samples for UI prefill."""
+    return {"samples": SAMPLES}
+
+
+@app.post("/api/triage")
+def triage(payload: TriageRequest) -> Dict[str, Any]:
+    """Process one message through the triage workflow."""
+    metadata = _build_metadata(payload)
+    try:
+        result = process_message(
+            message=payload.message,
+            source=payload.source,
+            metadata=metadata,
+        )
+    except Exception as exc:  # pragma: no cover - integration behavior
+        detail = str(exc) or "Processing failed."
+        status_code = 502 if "Classification failed guardrails" in detail else 500
+        if status_code == 502:
+            logger.warning("Triage classification failed: %s", detail)
+        else:
+            logger.exception("Triage processing failed")
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    result["request_id"] = metadata["request_id"]
+    result["external_id"] = payload.external_id
+    result["customer_id"] = payload.customer_id
+    result["received_at"] = payload.received_at
+    result["channel_metadata"] = payload.channel_metadata
+    return result
+
+
+@app.post("/api/batch")
+def batch_run() -> Dict[str, Any]:
+    """Run triage against all configured samples and return concise results."""
+    records: list[Dict[str, Any]] = []
+    for sample in SAMPLES:
+        metadata = sample.get("prefill") or {}
+        try:
+            result = process_message(
+                message=sample.get("message", ""),
+                source=sample.get("source", "Email"),
+                metadata=metadata,
+            )
+            records.append(
+                {
+                    "sample_id": sample.get("id"),
+                    "source": sample.get("source"),
+                    "category": result.get("category"),
+                    "priority": result.get("priority"),
+                    "confidence": result.get("confidence"),
+                    "confidence_level": result.get("confidence_level"),
+                    "confidence_source": result.get("confidence_source"),
+                    "destination_queue": result.get("destination_queue"),
+                    "escalation_flag": result.get("escalation_flag"),
+                    "idempotent_replay": result.get("idempotent_replay"),
+                    "processing_ms": result.get("processing_ms"),
+                }
             )
         except Exception as exc:  # pragma: no cover - integration behavior
-            lines.append(f"### Sample {index}: ❌ Error — {exc}\n")
-
-    full_summary = "\n".join(lines)
-    return full_summary, f"Processed {len(SAMPLES)} samples."
-
-
-with gr.Blocks(
-    title="ArcVault Triage System",
-) as demo:
-    gr.Markdown(
-        """
-        # ArcVault Support Triage System
-
-        AI-powered intake and triage pipeline for customer support messages.
-        """
-    )
-
-    with gr.Row():
-        with gr.Column(scale=2):
-            gr.Markdown("## Input")
-
-            source_dropdown = gr.Dropdown(
-                choices=["Email", "Web Form", "Support Portal"],
-                label="Message Source",
-                value="Email",
-                interactive=True,
+            records.append(
+                {
+                    "sample_id": sample.get("id"),
+                    "source": sample.get("source"),
+                    "error": str(exc),
+                }
             )
 
-            message_textbox = gr.Textbox(
-                lines=5,
-                label="Message Content",
-                placeholder="Paste the customer message here...",
-                interactive=True,
-            )
-
-            with gr.Row():
-                process_btn = gr.Button("Process Message", variant="primary", size="lg")
-                clear_btn = gr.Button("Clear", variant="secondary")
-
-            gr.Markdown("### Load Sample Messages")
-            with gr.Row():
-                sample1_btn = gr.Button("Sample 1", size="sm")
-                sample2_btn = gr.Button("Sample 2", size="sm")
-                sample3_btn = gr.Button("Sample 3", size="sm")
-            with gr.Row():
-                sample4_btn = gr.Button("Sample 4", size="sm")
-                sample5_btn = gr.Button("Sample 5", size="sm")
-                batch_btn = gr.Button("Process All Samples", variant="secondary", size="sm")
-
-        with gr.Column(scale=3):
-            gr.Markdown("## Results")
-
-            status_output = gr.Textbox(label="Status", interactive=False, lines=1)
-            results_json = gr.JSON(label="Processed Record", height=420)
-            batch_output = gr.Markdown(label="Batch Results", visible=False)
-
-    process_btn.click(
-        fn=process_single_message,
-        inputs=[source_dropdown, message_textbox],
-        outputs=[results_json, status_output],
-    )
-
-    clear_btn.click(
-        fn=lambda: ("Email", "", {}, ""),
-        outputs=[source_dropdown, message_textbox, results_json, status_output],
-    )
-
-    sample1_btn.click(fn=lambda: load_sample(1), outputs=[source_dropdown, message_textbox])
-    sample2_btn.click(fn=lambda: load_sample(2), outputs=[source_dropdown, message_textbox])
-    sample3_btn.click(fn=lambda: load_sample(3), outputs=[source_dropdown, message_textbox])
-    sample4_btn.click(fn=lambda: load_sample(4), outputs=[source_dropdown, message_textbox])
-    sample5_btn.click(fn=lambda: load_sample(5), outputs=[source_dropdown, message_textbox])
-
-    def run_batch() -> Tuple[str, str, Any]:
-        summary, status = batch_process_all()
-        return summary, status, gr.update(visible=True)
-
-    batch_btn.click(
-        fn=run_batch,
-        outputs=[batch_output, status_output, batch_output],
-    )
-
-    gr.Markdown(
-        """
-        ---
-        Results are saved to `output/processed_records.jsonl` and Google Sheets (if configured).
-        """
-    )
+    return {"count": len(records), "records": records}
 
 
 def main() -> None:
-    """Launch the Gradio web interface."""
-    print("=" * 60)
-    print("ArcVault Support Triage System")
-    print("=" * 60)
-    print("\nStarting web interface...")
-    print("Open your browser to: http://localhost:7860")
-    print("\nPress Ctrl+C to stop the server.")
-    print("=" * 60)
+    """Run the local web server."""
+    import uvicorn
 
-    demo.launch(
-        server_name="localhost",
-        server_port=7860,
-        share=False,
-        show_error=True,
-        theme=gr.themes.Soft(),
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "7860"))
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    uvicorn.run("app:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":
