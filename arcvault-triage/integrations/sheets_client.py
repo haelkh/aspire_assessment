@@ -24,12 +24,21 @@ class SheetsClient:
 
     # Column headers matching the expected sheet structure
     HEADERS = [
+        "Record ID",
+        "Ingestion ID",
+        "Pipeline Version",
+        "Processing (ms)",
+        "Replay",
+        "Request ID",
+        "Customer ID",
+        "Received At",
         "Timestamp",
         "Source",
         "Message",
         "Category",
         "Priority",
         "Confidence",
+        "Guardrail Flags",
         "Core Issue",
         "Identifiers",
         "Urgency",
@@ -37,6 +46,7 @@ class SheetsClient:
         "Final Queue",
         "Escalation",
         "Escalation Rules",
+        "Escalation Evidence",
         "Escalation Reason",
         "Summary"
     ]
@@ -174,12 +184,21 @@ class SheetsClient:
             identifiers = str(identifiers)
 
         return [
+            record.get("record_id", ""),
+            record.get("ingestion_id", ""),
+            record.get("pipeline_version", ""),
+            f"{record.get('processing_ms', 0.0):.2f}",
+            "YES" if record.get("idempotent_replay", False) else "NO",
+            record.get("request_id", ""),
+            record.get("customer_id", ""),
+            record.get("received_at", ""),
             record.get("timestamp", datetime.now().isoformat()),
             record.get("source", ""),
             message,
             record.get("category", ""),
             record.get("priority", ""),
             f"{record.get('confidence', 0):.2f}",
+            ", ".join(record.get("classification_guardrail_flags", [])),
             record.get("core_issue", ""),
             identifiers,
             record.get("urgency_signal", ""),
@@ -187,6 +206,7 @@ class SheetsClient:
             record.get("destination_queue", ""),
             "YES" if record.get("escalation_flag", False) else "NO",
             ", ".join(record.get("escalation_rules_triggered", [])),
+            " | ".join(record.get("escalation_rule_evidence", [])),
             record.get("escalation_reason", ""),
             record.get("human_summary", "")
         ]

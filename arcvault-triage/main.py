@@ -8,6 +8,7 @@ through the triage workflow.
 
 import argparse
 import json
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,7 @@ def print_result(result: Dict[str, Any]) -> None:
     print(f"Category:          {result.get('category', 'N/A')}")
     print(f"Priority:          {result.get('priority', 'N/A')}")
     print(f"Confidence:        {result.get('confidence', 0):.2%}")
+    print(f"Guardrail Flags:   {', '.join(result.get('classification_guardrail_flags', [])) or 'None'}")
     print(f"Proposed Queue:    {result.get('proposed_queue', 'N/A')}")
     print(f"Final Queue:       {result.get('destination_queue', 'N/A')}")
 
@@ -48,9 +50,16 @@ def print_result(result: Dict[str, Any]) -> None:
         rules_text = ", ".join(rules) if rules else "N/A"
         print(f"Escalation:        YES")
         print(f"Escalation Rules:  {rules_text}")
+        evidence_text = ", ".join(result.get("escalation_rule_evidence", [])) or "N/A"
+        print(f"Rule Evidence:     {evidence_text}")
         print(f"Escalation Reason: {result.get('escalation_reason', 'Unknown')}")
     else:
         print("Escalation:        No")
+
+    print(f"Replay:            {result.get('idempotent_replay', False)}")
+    print(f"Processing (ms):   {result.get('processing_ms', 0.0)}")
+    print(f"Ingestion ID:      {result.get('ingestion_id', 'N/A')}")
+    print(f"Pipeline Version:  {result.get('pipeline_version', 'N/A')}")
 
     print(f"\nCore Issue: {result.get('core_issue', 'N/A')}")
     print(f"Identifiers: {', '.join(result.get('identifiers', [])) or 'None'}")
@@ -131,6 +140,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Main CLI entry point."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
     args = parse_args()
 
     if args.command in (None, "all"):

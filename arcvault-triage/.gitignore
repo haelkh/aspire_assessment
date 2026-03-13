@@ -22,4 +22,6 @@ env/
 
 # Output (keep folder but ignore contents)
 output/*.json
+output/*.jsonl
+output/*.db
 !output/.gitkeep

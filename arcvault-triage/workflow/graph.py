@@ -1,14 +1,13 @@
-"""
-LangGraph workflow definition for the ArcVault Triage system.
-
-This module defines the workflow graph that orchestrates
-the message triage pipeline.
-"""
+"""LangGraph workflow definition for the ArcVault Triage system."""
 
 import threading
-from typing import Literal
-from langgraph.graph import StateGraph, END
+import time
+import uuid
+from typing import Any, Literal, Optional
 
+from langgraph.graph import END, StateGraph
+
+from config.settings import PIPELINE_VERSION
 from workflow.state import TriageState
 from workflow.nodes import (
     classify_node,
@@ -81,7 +80,11 @@ def build_workflow() -> StateGraph:
     return graph.compile()
 
 
-def process_message(message: str, source: str) -> dict:
+def process_message(
+    message: str,
+    source: str,
+    metadata: Optional[dict[str, Any]] = None,
+) -> dict:
     """
     Process a single message through the triage workflow.
 
@@ -97,11 +100,18 @@ def process_message(message: str, source: str) -> dict:
     """
     workflow = get_workflow()
 
-    # Initialize state with input
+    # Initialize state with input and trace metadata.
     initial_state = {
         "message": message,
-        "source": source
+        "source": source,
+        "ingestion_id": str(uuid.uuid4()),
+        "processing_started_at": time.perf_counter(),
+        "pipeline_version": PIPELINE_VERSION,
     }
+    if metadata:
+        for key, value in metadata.items():
+            if value is not None:
+                initial_state[key] = value
 
     # Run the workflow
     result = workflow.invoke(initial_state)

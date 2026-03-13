@@ -1,11 +1,6 @@
-"""
-State schema for the ArcVault Triage workflow.
+"""State schema for the ArcVault Triage workflow."""
 
-This module defines the TriageState TypedDict that represents the state
-passed between nodes in the LangGraph workflow.
-"""
-
-from typing import TypedDict, Optional
+from typing import Any, Optional, TypedDict
 
 
 class TriageState(TypedDict, total=False):
@@ -22,6 +17,30 @@ class TriageState(TypedDict, total=False):
 
     source: str
     """Where the message came from: Email, Web Form, or Support Portal."""
+
+    request_id: Optional[str]
+    """Caller-provided request identifier used for idempotency when present."""
+
+    external_id: Optional[str]
+    """Legacy external identifier preserved for backward compatibility."""
+
+    customer_id: Optional[str]
+    """Optional customer identifier from the upstream channel."""
+
+    received_at: Optional[str]
+    """Upstream received timestamp (ISO-8601 string when provided)."""
+
+    channel_metadata: Optional[dict[str, Any]]
+    """Optional metadata payload passed from the source channel."""
+
+    ingestion_id: str
+    """Per-run correlation id for tracing logs and records."""
+
+    processing_started_at: float
+    """High-resolution start timestamp used to compute processing duration."""
+
+    pipeline_version: str
+    """Pipeline version included in all outputs for traceability."""
 
     # === Classification Fields ===
     category: str
@@ -48,6 +67,9 @@ class TriageState(TypedDict, total=False):
     Float between 0.0 and 1.0.
     Values below 0.70 trigger human escalation.
     """
+
+    classification_guardrail_flags: list[str]
+    """Validation and parsing guardrail flags captured during classification."""
 
     # === Enrichment Fields ===
     core_issue: str
@@ -88,9 +110,18 @@ class TriageState(TypedDict, total=False):
     escalation_reason: Optional[str]
     """If escalation_flag is True, explains why (low confidence or keyword trigger)."""
 
+    escalation_rule_evidence: list[str]
+    """Readable evidence snippets for each triggered escalation rule."""
+
     # === Output Fields ===
     timestamp: str
     """ISO format timestamp when the record was processed."""
 
     record_id: Optional[str]
     """Unique identifier for this processed record."""
+
+    idempotent_replay: bool
+    """True when request matched an existing dedup key and was not re-persisted."""
+
+    processing_ms: float
+    """End-to-end processing duration in milliseconds."""

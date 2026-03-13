@@ -1,12 +1,14 @@
-"""
-Workflow nodes for the ArcVault Triage system — test helpers.
+"""Test fixtures for workflow state isolation."""
 
-Expose internal deduplication state for test resets.
-"""
+from pathlib import Path
 
-from workflow.nodes import _processed_hashes
+import pytest
+
+from storage.idempotency_store import reset_idempotency_store_for_tests
 
 
-def reset_dedup_cache() -> None:
-    """Clear the in-memory deduplication cache for test isolation."""
-    _processed_hashes.clear()
+@pytest.fixture(autouse=True)
+def reset_idempotency_store(tmp_path: Path) -> None:
+    """Ensure each test uses an isolated SQLite idempotency database."""
+    db_path = tmp_path / "output" / "triage_state.db"
+    reset_idempotency_store_for_tests(str(db_path))

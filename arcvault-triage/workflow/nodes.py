@@ -1,52 +1,43 @@
-"""
-Workflow nodes for the ArcVault Triage system.
+"""Workflow nodes for the ArcVault Triage system."""
 
-This module contains the node functions that process messages
-through the triage pipeline using LangGraph.
-"""
+from __future__ import annotations
 
 import hashlib
 import json
-import os
+import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, List
 
-from workflow.state import TriageState
-from workflow.prompts import CLASSIFICATION_PROMPT, ENRICHMENT_PROMPT
-from integrations.gemini_client import get_gemini_client
 from config.settings import (
+    BILLING_DISPUTE_KEYWORDS,
     BILLING_ESCALATION_DELTA_THRESHOLD,
     CATEGORIES,
     ESCALATION_CONFIDENCE_THRESHOLD,
     ESCALATION_KEYWORDS,
     ESCALATION_QUEUE,
+    PIPELINE_VERSION,
     PRIORITIES,
     QUEUE_MAPPING,
 )
+from integrations.gemini_client import get_gemini_client
+from storage.idempotency_store import get_idempotency_store
+from storage.record_store import append_record_jsonl
+from workflow.prompts import CLASSIFICATION_PROMPT, ENRICHMENT_PROMPT
+from workflow.state import TriageState
 
 
 DEFAULT_CATEGORY = "Technical Question"
 DEFAULT_PRIORITY = "Medium"
 
-# In-memory deduplication set (source + message hash)
-_processed_hashes: set = set()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
-def _generate_record_id(source: str, message: str) -> str:
-    """Generate a deterministic record ID from source and message."""
-    content = f"{source}:{message}".encode("utf-8")
-    return hashlib.sha256(content).hexdigest()[:16]
-
-
-def _is_duplicate(record_id: str) -> bool:
-    """Check if a record has already been processed."""
-    return record_id in _processed_hashes
-
-
-def _mark_processed(record_id: str) -> None:
-    """Mark a record as processed."""
-    _processed_hashes.add(record_id)
+def _log_event(level: int, event: str, **fields: Any) -> None:
+    payload = {"event": event, **fields}
+    logger.log(level, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _normalize_confidence(value: Any, default: float = 0.5) -> float:
@@ -61,6 +52,26 @@ def _normalize_confidence(value: Any, default: float = 0.5) -> float:
         confidence = default
 
     return max(0.0, min(1.0, float(confidence)))
+
+
+def _canonicalize_message(message: str) -> str:
+    """Normalize message text for stable deduplication."""
+    return " ".join(message.split()).strip().lower()
+
+
+def _build_dedup_key(source: str, message: str, request_id: str | None) -> str:
+    """Build a persistent dedup key using request_id when available."""
+    if request_id and request_id.strip():
+        return f"request_id:{request_id.strip().lower()}"
+
+    canonical = f"{source.strip().lower()}::{_canonicalize_message(message)}"
+    content_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"content:{content_hash}"
+
+
+def _generate_record_id(dedup_key: str) -> str:
+    """Generate a deterministic record ID from dedup key."""
+    return hashlib.sha256(dedup_key.encode("utf-8")).hexdigest()[:16]
 
 
 def _extract_dollar_amounts(message: str) -> List[float]:
@@ -78,9 +89,23 @@ def _extract_dollar_amounts(message: str) -> List[float]:
 
 
 def _keyword_matches(message_lower: str, keyword: str) -> bool:
-    """Check if a keyword matches using word boundaries to avoid false positives."""
-    pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
+    """Check if a keyword matches using word boundaries."""
+    pattern = r"\b" + re.escape(keyword.lower()) + r"\b"
     return bool(re.search(pattern, message_lower))
+
+
+def _find_billing_dispute_keywords(message_lower: str) -> List[str]:
+    matches: List[str] = []
+    for keyword in BILLING_DISPUTE_KEYWORDS:
+        if _keyword_matches(message_lower, keyword):
+            matches.append(keyword)
+    return matches
+
+
+def _compute_processing_ms(started_at: Any) -> float:
+    if isinstance(started_at, (int, float)):
+        return round((time.perf_counter() - float(started_at)) * 1000.0, 2)
+    return 0.0
 
 
 def _build_escalation_reason(rules: List[str], confidence: float) -> str | None:
@@ -115,17 +140,24 @@ def _build_escalation_reason(rules: List[str], confidence: float) -> str | None:
             f"({delta} > {BILLING_ESCALATION_DELTA_THRESHOLD:.2f})"
         )
 
+    single_amount_rules = [
+        rule.split(":", 1)[1]
+        for rule in rules
+        if rule.startswith("billing_single_amount_dispute:") and ":" in rule
+    ]
+    if single_amount_rules:
+        amount = single_amount_rules[-1]
+        parts.append(
+            "Billing dispute language detected with one amount "
+            f"(${amount}) requiring human review"
+        )
+
     return "; ".join(parts)
 
 
 def classify_node(state: TriageState) -> Dict[str, Any]:
     """
     Classify the message using Gemini API.
-
-    This node analyzes the message and assigns:
-    - category: The type of request (Bug Report, Feature Request, etc.)
-    - priority: Urgency level (Low, Medium, High)
-    - confidence: How certain the model is about the classification
 
     Invalid or failed LLM outputs are sanitized and forced into
     escalation-safe defaults.
@@ -140,7 +172,7 @@ def classify_node(state: TriageState) -> Dict[str, Any]:
 
     try:
         result = client.generate_json(prompt)
-    except Exception as exc:  # pragma: no cover - exercised via integration/smoke paths
+    except Exception as exc:  # pragma: no cover - integration behavior
         result = {}
         classification_errors.append(f"classification_error:{exc.__class__.__name__}")
 
@@ -163,11 +195,18 @@ def classify_node(state: TriageState) -> Dict[str, Any]:
     # Any validation failure forces escalation-safe confidence.
     if classification_errors:
         confidence = 0.0
+        _log_event(
+            logging.WARNING,
+            "classification_guardrail_triggered",
+            ingestion_id=state.get("ingestion_id"),
+            flags=classification_errors,
+        )
 
     return {
         "category": category,
         "priority": priority,
         "confidence": confidence,
+        "classification_guardrail_flags": classification_errors,
     }
 
 
@@ -188,7 +227,7 @@ def enrich_node(state: TriageState) -> Dict[str, Any]:
 
     try:
         result = client.generate_json(prompt)
-    except Exception:  # pragma: no cover - exercised via integration/smoke paths
+    except Exception:  # pragma: no cover - integration behavior
         result = {}
 
     if not isinstance(result, dict):
@@ -232,33 +271,52 @@ def route_node(state: TriageState) -> Dict[str, Any]:
 
     Escalation criteria:
     - Confidence below threshold
-    - Escalation keywords in message (word-boundary matched)
+    - Escalation keywords in message
     - Billing issue with dollar amount delta above configured threshold
+    - Billing issue with one amount + dispute language
     """
     category = state.get("category", DEFAULT_CATEGORY)
     proposed_queue = QUEUE_MAPPING.get(category, "IT/Security")
 
     confidence = _normalize_confidence(state.get("confidence", 1.0), default=1.0)
-    message_lower = state.get("message", "").lower()
+    message = state.get("message", "")
+    message_lower = message.lower()
 
     escalation_rules_triggered: List[str] = []
+    escalation_rule_evidence: List[str] = []
 
     if confidence < ESCALATION_CONFIDENCE_THRESHOLD:
         escalation_rules_triggered.append("low_confidence")
+        escalation_rule_evidence.append(
+            f"confidence={confidence:.2f}, threshold={ESCALATION_CONFIDENCE_THRESHOLD:.2f}"
+        )
 
-    matched_keywords: List[str] = []
     for keyword in ESCALATION_KEYWORDS:
         if _keyword_matches(message_lower, keyword):
-            matched_keywords.append(keyword)
             escalation_rules_triggered.append(f"keyword:{keyword}")
+            escalation_rule_evidence.append(f"matched_keyword='{keyword}'")
 
     if category == "Billing Issue":
-        amounts = _extract_dollar_amounts(state.get("message", ""))
+        amounts = _extract_dollar_amounts(message)
         if len(amounts) >= 2:
             delta = max(amounts) - min(amounts)
             if delta > BILLING_ESCALATION_DELTA_THRESHOLD:
                 escalation_rules_triggered.append(
                     f"billing_delta_exceeds_threshold:{delta:.2f}"
+                )
+                escalation_rule_evidence.append(
+                    f"billing_amounts={amounts}, delta={delta:.2f}, "
+                    f"threshold={BILLING_ESCALATION_DELTA_THRESHOLD:.2f}"
+                )
+        elif len(amounts) == 1:
+            billing_dispute_hits = _find_billing_dispute_keywords(message_lower)
+            if billing_dispute_hits:
+                amount = amounts[0]
+                escalation_rules_triggered.append(
+                    f"billing_single_amount_dispute:{amount:.2f}"
+                )
+                escalation_rule_evidence.append(
+                    f"billing_amount={amount:.2f}, dispute_keywords={billing_dispute_hits}"
                 )
 
     escalation_flag = len(escalation_rules_triggered) > 0
@@ -270,6 +328,7 @@ def route_node(state: TriageState) -> Dict[str, Any]:
         "destination_queue": destination_queue,
         "escalation_flag": escalation_flag,
         "escalation_rules_triggered": escalation_rules_triggered,
+        "escalation_rule_evidence": escalation_rule_evidence,
         "escalation_reason": escalation_reason,
     }
 
@@ -279,21 +338,50 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     Write the processed record to output destinations.
 
     This node writes:
-    - Local JSON runtime log (append-only, with deduplication)
+    - Local JSONL runtime log (append-only, replay-safe)
     - Google Sheets row (if configured)
     """
     from integrations.sheets_client import get_sheets_client
 
     timestamp = datetime.now().isoformat()
-    record_id = _generate_record_id(
-        state.get("source", ""), state.get("message", "")
+    request_id = state.get("request_id") or state.get("external_id")
+    dedup_key = _build_dedup_key(
+        state.get("source", ""),
+        state.get("message", ""),
+        request_id,
+    )
+    record_id = _generate_record_id(dedup_key)
+    processing_ms = _compute_processing_ms(state.get("processing_started_at"))
+    ingestion_id = state.get("ingestion_id")
+    pipeline_version = state.get("pipeline_version", PIPELINE_VERSION)
+
+    store = get_idempotency_store()
+    is_replay = store.register_or_replay(
+        dedup_key=dedup_key,
+        record_id=record_id,
+        source=state.get("source", ""),
+        request_id=request_id,
     )
 
-    # Deduplication check
-    if _is_duplicate(record_id):
+    response_meta = {
+        "timestamp": timestamp,
+        "record_id": record_id,
+        "idempotent_replay": is_replay,
+        "processing_ms": processing_ms,
+        "ingestion_id": ingestion_id,
+        "pipeline_version": pipeline_version,
+    }
+
+    if is_replay:
+        _log_event(
+            logging.INFO,
+            "idempotent_replay_detected",
+            ingestion_id=ingestion_id,
+            record_id=record_id,
+            dedup_key=dedup_key,
+        )
         return {
-            "timestamp": timestamp,
-            "record_id": record_id,
+            **response_meta,
             "output_saved": False,
             "sheets_saved": False,
             "duplicate": True,
@@ -302,11 +390,21 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     record = {
         "record_id": record_id,
         "timestamp": timestamp,
+        "pipeline_version": pipeline_version,
+        "ingestion_id": ingestion_id,
+        "processing_ms": processing_ms,
+        "idempotent_replay": False,
+        "request_id": request_id,
+        "external_id": state.get("external_id"),
+        "customer_id": state.get("customer_id"),
+        "received_at": state.get("received_at"),
+        "channel_metadata": state.get("channel_metadata"),
         "source": state.get("source", ""),
         "message": state.get("message", ""),
         "category": state.get("category", ""),
         "priority": state.get("priority", ""),
         "confidence": state.get("confidence", 0.0),
+        "classification_guardrail_flags": state.get("classification_guardrail_flags", []),
         "core_issue": state.get("core_issue", ""),
         "identifiers": state.get("identifiers", []),
         "urgency_signal": state.get("urgency_signal", ""),
@@ -314,40 +412,38 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         "destination_queue": state.get("destination_queue", ""),
         "escalation_flag": state.get("escalation_flag", False),
         "escalation_rules_triggered": state.get("escalation_rules_triggered", []),
+        "escalation_rule_evidence": state.get("escalation_rule_evidence", []),
         "escalation_reason": state.get("escalation_reason"),
         "human_summary": state.get("human_summary", ""),
     }
 
-    output_dir = "output"
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "processed_records.json")
-
-    existing_records: List[Dict[str, Any]] = []
-    if os.path.exists(output_file):
-        try:
-            with open(output_file, "r", encoding="utf-8") as file_handle:
-                existing_records = json.load(file_handle)
-        except (json.JSONDecodeError, FileNotFoundError):
-            existing_records = []
-
-    existing_records.append(record)
-
-    with open(output_file, "w", encoding="utf-8") as file_handle:
-        json.dump(existing_records, file_handle, indent=2, ensure_ascii=False)
-
-    _mark_processed(record_id)
+    append_record_jsonl(record)
 
     try:
         sheets_client = get_sheets_client()
         sheets_client.append_record(record)
         sheets_success = True
-    except Exception as exc:
-        print(f"Warning: Could not write to Google Sheets: {exc}")
+    except Exception as exc:  # pragma: no cover - integration behavior
+        _log_event(
+            logging.WARNING,
+            "sheets_write_failed",
+            ingestion_id=ingestion_id,
+            record_id=record_id,
+            error=str(exc),
+        )
         sheets_success = False
 
+    _log_event(
+        logging.INFO,
+        "record_persisted",
+        ingestion_id=ingestion_id,
+        record_id=record_id,
+        destination_queue=state.get("destination_queue"),
+        escalation_flag=state.get("escalation_flag", False),
+    )
+
     return {
-        "timestamp": timestamp,
-        "record_id": record_id,
+        **response_meta,
         "output_saved": True,
         "sheets_saved": sheets_success,
     }
@@ -360,19 +456,19 @@ def escalate_node(state: TriageState) -> Dict[str, Any]:
     This node performs output operations and logs an explicit escalation alert.
     """
     result = output_node(state)
-
     result["escalation_processed"] = True
     result["escalation_reason"] = state.get("escalation_reason")
 
-    print(f"\n{'=' * 60}")
-    print("ESCALATION ALERT")
-    print(f"{'=' * 60}")
-    print(f"Category: {state.get('category')}")
-    print(f"Priority: {state.get('priority')}")
-    print(f"Proposed Queue: {state.get('proposed_queue')}")
-    print(f"Final Queue: {state.get('destination_queue')}")
-    print(f"Reason: {state.get('escalation_reason')}")
-    print(f"Core Issue: {state.get('core_issue')}")
-    print(f"{'=' * 60}\n")
-
+    _log_event(
+        logging.WARNING,
+        "escalation_alert",
+        ingestion_id=state.get("ingestion_id"),
+        record_id=result.get("record_id"),
+        category=state.get("category"),
+        priority=state.get("priority"),
+        proposed_queue=state.get("proposed_queue"),
+        destination_queue=state.get("destination_queue"),
+        rules=state.get("escalation_rules_triggered", []),
+        reason=state.get("escalation_reason"),
+    )
     return result

@@ -10,12 +10,12 @@ Automate intake, classification, enrichment, routing, and escalation for unstruc
 
 ```mermaid
 flowchart LR
-    A[📥 Ingest] --> B[🏷️ Classify]
-    B --> C[🔍 Enrich]
-    C --> D{🔀 Route}
-    D -->|escalation_flag = false| E[📤 Output]
-    D -->|escalation_flag = true| F[🚨 Escalate]
-    E --> G[✅ END]
+    A[Ingest] --> B[Classify]
+    B --> C[Enrich]
+    C --> D{Route}
+    D -->|escalation_flag = false| E[Output]
+    D -->|escalation_flag = true| F[Escalate]
+    E --> G[END]
     F --> G
 ```
 
@@ -43,7 +43,8 @@ flowchart TB
     end
 
     subgraph Persistence["Persistence Layer"]
-        JSON["output/processed_records.json"]
+        JSONL["output/processed_records.jsonl"]
+        DB["output/triage_state.db<br/>(SQLite idempotency)"]
         SHEETS["Google Sheets (optional)"]
     end
 
@@ -56,17 +57,20 @@ flowchart TB
     CL -.->|calls| GEM
     EN -.->|calls| GEM
     GEM -.->|validated by| GUARD
-    OUT --> JSON
+    OUT --> JSONL
+    OUT --> DB
     OUT --> SHEETS
-    ESC --> JSON
+    ESC --> JSONL
+    ESC --> DB
     ESC --> SHEETS
 ```
 
 ### Components
 
 1. Ingestion Layer
-- `ingestion/webhook_api.py` exposes `POST /intake` and `GET /health` with rate limiting.
-- `app.py` (Gradio) and `main.py` (CLI) are additional demo/operator interfaces.
+- `ingestion/webhook_api.py` exposes `POST /intake` and `GET /health`.
+- Intake supports optional auth via `X-API-Key` when `INTAKE_API_KEY` is configured.
+- Payload now supports `request_id`, `customer_id`, `received_at`, and `channel_metadata`.
 
 2. Workflow Orchestration Layer
 - `workflow/graph.py` defines a LangGraph pipeline:
@@ -74,26 +78,28 @@ flowchart TB
   - `enrich_node`
   - `route_node`
   - conditional branch to `output_node` or `escalate_node`
+- Graph injects trace metadata (`ingestion_id`, `processing_started_at`, `pipeline_version`).
 
 3. AI Processing Layer
 - `integrations/gemini_client.py` calls Gemini with structured JSON output mode (`response_mime_type="application/json"`) and retry with exponential backoff.
-- Guardrails in `workflow/nodes.py` sanitize model outputs and prevent malformed responses from breaking the pipeline.
+- Guardrails in `workflow/nodes.py` sanitize model outputs and expose guardrail flags in final records.
 
 4. Persistence Layer
-- Runtime append log: `output/processed_records.json` (with deduplication)
-- Deterministic deliverable artifact: `output/submission_records.json`
-- Optional Google Sheets sink: `integrations/sheets_client.py`
+- Runtime append log: `output/processed_records.jsonl` (append-safe JSONL).
+- Persistent replay detection: `output/triage_state.db` via SQLite.
+- Deterministic deliverable artifact: `output/submission_records.json`.
+- Optional Google Sheets sink: `integrations/sheets_client.py`.
 
 ### State and Data Contract
 
-`TriageState` tracks input, model outputs, routing, escalation metadata, and persistence timestamp.
-Key routing fields:
+`TriageState` tracks input, model outputs, routing, escalation metadata, trace metadata, and output fields.
+Key fields:
 
-- `record_id`: deterministic SHA-256 hash of source + message for deduplication
-- `proposed_queue`: queue implied by category mapping
-- `destination_queue`: final dispatch queue (overridden to `Human Review` when escalated)
-- `escalation_rules_triggered`: machine-readable reasons
-- `escalation_reason`: human-readable explanation
+- `request_id` / `external_id` for idempotency-aware intake
+- `ingestion_id`, `processing_ms`, `pipeline_version` for observability
+- `classification_guardrail_flags` for model-output validation transparency
+- `escalation_rules_triggered` plus `escalation_rule_evidence` for auditability
+- `idempotent_replay` for duplicate detection visibility
 
 ## 2. Routing Logic
 
@@ -119,72 +125,86 @@ This design preserves ownership intent (`proposed_queue`) while enforcing safe f
 A message is escalated when any rule is true:
 
 1. `confidence < 0.70`
-2. message contains configured escalation keywords (word-boundary matched to avoid false positives)
+2. message contains configured escalation keywords (word-boundary matched)
 3. category is `Billing Issue` and extracted dollar amount delta is `> $500`
+4. category is `Billing Issue` with one dollar amount plus dispute language (`overcharge`, `billing error`, etc.)
 
-Outputs include both machine-readable and human-readable reasons. Example machine rules:
+Outputs include machine-readable rules and explicit evidence snippets.
 
-- `low_confidence`
-- `keyword:multiple users affected`
-- `billing_delta_exceeds_threshold:620.00`
+## 4. Before vs After (Assessment Boost)
 
-## 4. Reliability and Failure Handling
+### Before
+- Intake accepted only basic fields (`source`, `message`, optional `external_id`).
+- No webhook auth toggle.
+- Deduplication was in-memory only.
+- Runtime output used read-modify-write JSON array.
+- Guardrail failures were not surfaced in output records.
+
+### After
+- Intake contract is richer and validated (`request_id`, `customer_id`, `received_at`, `channel_metadata`).
+- Optional API-key enforcement added for ingestion.
+- Idempotency is persistent via SQLite and survives restarts.
+- Runtime output is append-safe JSONL.
+- Responses/records include trace metadata (`ingestion_id`, `processing_ms`, `pipeline_version`).
+- Guardrail and escalation evidence is first-class output data.
+
+## 5. Reliability and Failure Handling
 
 ### LLM Robustness
 
-- **Structured output mode**: `response_mime_type="application/json"` eliminates most JSON parsing issues at the API level.
-- **Retry with backoff**: Transient API failures are retried 3 times with exponential backoff and jitter.
+- Structured output mode enforces JSON in the common path.
+- Retry with backoff handles transient API failures.
 - Invalid category/priority values are coerced to safe defaults.
-- Confidence is normalized to `[0.0, 1.0]`.
-- Classification failures force confidence to `0.0` to trigger safe escalation behavior.
+- Classification failures force confidence to `0.0` and emit guardrail flags.
 - Enrichment failures return safe fallback fields instead of throwing exceptions.
 
 ### Storage Robustness
 
-- Local output directory auto-created if missing.
-- JSON append log handles corrupt/empty files by recovering with a fresh list.
-- Google Sheets writes are best-effort; failures do not block the core workflow.
-- Deduplication prevents duplicate records from repeated processing.
+- Output directory auto-created when missing.
+- JSONL append avoids full-file rewrite risks.
+- SQLite idempotency table prevents replay duplication across restarts.
+- Google Sheets writes are best-effort; failures do not block core workflow.
 
 ### API Robustness
 
-- In-memory rate limiting (60 requests/minute) on the webhook endpoint.
-- Thread-safe workflow singleton via double-checked locking.
+- In-memory rate limiting (60 requests/minute) at webhook layer.
+- Optional API key enforcement.
+- Thread-safe compiled workflow singleton.
 
 ### Verification
 
-Deterministic tests cover:
-
+Tests cover:
+- webhook contract validation (legacy payload + new fields + API key behavior)
 - low-confidence escalation
-- keyword escalation (including word-boundary false positive prevention)
-- billing-delta escalation
-- output schema presence and record ID generation
-- webhook API contract validation
-- model output guardrails and retry behavior
-- deduplication behavior
+- keyword escalation and false-positive guard
+- billing delta escalation
+- one-amount billing dispute escalation
+- output schema and metadata fields
+- deduplication + replay detection across store reinit
+- concurrent JSONL persistence integrity
 
-## 5. Production Scale Considerations
+## 6. Production Scale Considerations
 
-If this moved from assessment to production:
+If promoted beyond assessment scope:
 
 1. Reliability
 - Add dead-letter queue for failed records.
-- Add structured logging and metrics (error rate, latency, escalation ratio).
-- Move deduplication from in-memory to persistent store (Redis or database).
+- Emit metrics (latency, escalation ratio, replay ratio).
+- Move rate limiting from in-memory to shared store.
 
 2. Cost and Latency
 - Add cache for repeated message patterns.
-- Batch writes to external sinks.
-- Evaluate smaller/cheaper models for enrichment only.
+- Batch non-critical downstream writes.
+- Evaluate cheaper model variants for enrichment.
 
 3. Security
-- Add API auth for `/intake`.
-- Encrypt stored records and credentials.
-- Add audit events for every routing decision.
+- Replace static API key with signed webhook verification.
+- Encrypt persistent artifacts and rotate credentials.
+- Add audit events to central log sink.
 
-## 6. Phase 2 (One Additional Week)
+## 7. Phase 2 (One Additional Week)
 
-1. Human feedback loop to capture corrected labels and tune prompts.
-2. Subcategory taxonomy (for example `Bug Report -> Auth/UI/API`).
-3. Real downstream actions (ticket creation webhook per queue).
-4. Dashboard for escalations, confidence drift, and SLA metrics.
+1. Human feedback loop for corrected labels and prompt tuning.
+2. Subcategory taxonomy for better downstream ownership.
+3. Native downstream actions (ticket creation per queue).
+4. Dashboard for escalations, drift, and SLA metrics.

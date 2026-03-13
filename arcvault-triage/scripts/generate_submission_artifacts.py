@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
+from storage.idempotency_store import get_idempotency_store
 from workflow.graph import process_message
 
 
@@ -36,11 +37,20 @@ def build_submission_record(sample: Dict[str, Any], result: Dict[str, Any]) -> D
     """Build a deterministic record structure for assessment submission."""
     return {
         "sample_id": sample["id"],
+        "record_id": result.get("record_id"),
+        "ingestion_id": result.get("ingestion_id"),
+        "pipeline_version": result.get("pipeline_version"),
+        "processing_ms": result.get("processing_ms"),
+        "idempotent_replay": result.get("idempotent_replay"),
         "source": sample["source"],
         "message": sample["message"],
+        "request_id": result.get("request_id"),
+        "customer_id": result.get("customer_id"),
+        "received_at": result.get("received_at"),
         "category": result.get("category"),
         "priority": result.get("priority"),
         "confidence": result.get("confidence"),
+        "classification_guardrail_flags": result.get("classification_guardrail_flags", []),
         "core_issue": result.get("core_issue"),
         "identifiers": result.get("identifiers", []),
         "urgency_signal": result.get("urgency_signal"),
@@ -48,6 +58,7 @@ def build_submission_record(sample: Dict[str, Any], result: Dict[str, Any]) -> D
         "destination_queue": result.get("destination_queue"),
         "escalation_flag": result.get("escalation_flag"),
         "escalation_rules_triggered": result.get("escalation_rules_triggered", []),
+        "escalation_rule_evidence": result.get("escalation_rule_evidence", []),
         "escalation_reason": result.get("escalation_reason"),
         "human_summary": result.get("human_summary"),
         "timestamp": result.get("timestamp"),
@@ -79,6 +90,9 @@ def write_summary(records: List[Dict[str, Any]]) -> None:
 
 def generate_submission_artifacts() -> Dict[str, str]:
     """Generate deterministic JSON + summary artifacts from the five samples."""
+    # Reset replay tracking so deterministic submission runs do not inherit prior state.
+    get_idempotency_store().clear()
+
     samples = load_samples()
     records: List[Dict[str, Any]] = []
 

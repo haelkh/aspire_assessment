@@ -28,6 +28,7 @@ def test_classify_node_sanitizes_invalid_model_output(monkeypatch) -> None:
     assert result["category"] == "Technical Question"
     assert result["priority"] == "Medium"
     assert result["confidence"] == 0.0
+    assert any(flag.startswith("invalid_category:") for flag in result["classification_guardrail_flags"])
 
 
 def test_enrich_node_returns_safe_fallback_on_failure(monkeypatch) -> None:

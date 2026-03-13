@@ -49,16 +49,22 @@ def process_single_message(source: str, message: str) -> Tuple[Dict[str, Any], s
             "Category": result.get("category", "Unknown"),
             "Priority": result.get("priority", "Unknown"),
             "Confidence": f"{result.get('confidence', 0):.2%}",
+            "Guardrail Flags": result.get("classification_guardrail_flags", []),
             "Proposed Queue": result.get("proposed_queue", "Unknown"),
             "Final Queue": result.get("destination_queue", "Unknown"),
             "Escalation": "YES" if result.get("escalation_flag") else "NO",
             "Escalation Rules": result.get("escalation_rules_triggered", []),
+            "Escalation Evidence": result.get("escalation_rule_evidence", []),
             "Escalation Reason": result.get("escalation_reason") or "N/A",
             "Core Issue": result.get("core_issue", "N/A"),
             "Identifiers": ", ".join(result.get("identifiers", [])) or "None found",
             "Urgency Signal": result.get("urgency_signal", "None"),
             "Summary": result.get("human_summary", "N/A"),
             "Timestamp": result.get("timestamp", "N/A"),
+            "Ingestion ID": result.get("ingestion_id", "N/A"),
+            "Pipeline Version": result.get("pipeline_version", "N/A"),
+            "Processing (ms)": result.get("processing_ms", 0.0),
+            "Idempotent Replay": result.get("idempotent_replay", False),
         }
 
         status = "Message processed successfully."
@@ -186,7 +192,7 @@ with gr.Blocks(
     gr.Markdown(
         """
         ---
-        Results are saved to `output/processed_records.json` and Google Sheets (if configured).
+        Results are saved to `output/processed_records.jsonl` and Google Sheets (if configured).
         """
     )
 
