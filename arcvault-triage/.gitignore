@@ -1,0 +1,25 @@
+# Credentials
+credentials/
+*.json
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Output (keep folder but ignore contents)
+output/*.json
+!output/.gitkeep
