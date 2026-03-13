@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import math
 import re
 import time
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -23,7 +23,6 @@ from config.settings import (
     QUEUE_MAPPING,
 )
 from integrations.gemini_client import get_gemini_client
-from storage.idempotency_store import get_idempotency_store
 from storage.record_store import append_record_jsonl
 from workflow.prompts import CLASSIFICATION_PROMPT, ENRICHMENT_PROMPT
 from workflow.state import TriageState
@@ -90,24 +89,9 @@ def _confidence_level(confidence: float) -> str:
     return "Low"
 
 
-def _canonicalize_message(message: str) -> str:
-    """Normalize message text for stable deduplication."""
-    return " ".join(message.split()).strip().lower()
-
-
-def _build_dedup_key(source: str, message: str, request_id: str | None) -> str:
-    """Build a persistent dedup key using request_id when available."""
-    if request_id and request_id.strip():
-        return f"request_id:{request_id.strip().lower()}"
-
-    canonical = f"{source.strip().lower()}::{_canonicalize_message(message)}"
-    content_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return f"content:{content_hash}"
-
-
-def _generate_record_id(dedup_key: str) -> str:
-    """Generate a deterministic record ID from dedup key."""
-    return hashlib.sha256(dedup_key.encode("utf-8")).hexdigest()[:16]
+def _generate_record_id() -> str:
+    """Generate a unique record ID for each processed run."""
+    return uuid.uuid4().hex[:16]
 
 
 def _extract_dollar_amounts(message: str) -> List[float]:
@@ -199,6 +183,7 @@ def classify_node(state: TriageState) -> Dict[str, Any]:
     escalation-safe defaults.
     """
     client = get_gemini_client()
+    classification_model = getattr(client, "get_model_name", lambda: "unknown")()
     prompt = CLASSIFICATION_PROMPT.format(
         message=state["message"],
         source=state["source"],
@@ -270,6 +255,7 @@ def classify_node(state: TriageState) -> Dict[str, Any]:
         "confidence": float(confidence),
         "confidence_level": _confidence_level(float(confidence)),
         "confidence_source": "model",
+        "classification_model": classification_model,
         "classification_guardrail_flags": classification_errors,
     }
 
@@ -282,6 +268,7 @@ def enrich_node(state: TriageState) -> Dict[str, Any]:
     a complete, usable payload.
     """
     client = get_gemini_client()
+    enrichment_model = getattr(client, "get_model_name", lambda: "unknown")()
 
     prompt = ENRICHMENT_PROMPT.format(
         message=state["message"],
@@ -330,6 +317,7 @@ def enrich_node(state: TriageState) -> Dict[str, Any]:
         "identifiers": normalized_identifiers,
         "urgency_signal": urgency_signal,
         "human_summary": human_summary,
+        "enrichment_model": enrichment_model,
         "enrichment_guardrail_flags": enrichment_errors,
     }
 
@@ -407,53 +395,23 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     Write the processed record to output destinations.
 
     This node writes:
-    - Local JSONL runtime log (append-only, replay-safe)
+    - Local JSONL runtime log (append-only)
     """
     timestamp = datetime.now().isoformat()
     request_id = state.get("request_id") or state.get("external_id")
-    dedup_key = _build_dedup_key(
-        state.get("source", ""),
-        state.get("message", ""),
-        request_id,
-    )
-    record_id = _generate_record_id(dedup_key)
+    record_id = _generate_record_id()
     processing_ms = _compute_processing_ms(state.get("processing_started_at"))
     ingestion_id = state.get("ingestion_id")
     pipeline_version = state.get("pipeline_version", PIPELINE_VERSION)
 
-    store = get_idempotency_store()
-    is_replay = store.register_or_replay(
-        dedup_key=dedup_key,
-        record_id=record_id,
-        source=state.get("source", ""),
-        request_id=request_id,
-    )
-
     response_meta = {
         "timestamp": timestamp,
         "record_id": record_id,
-        "idempotent_replay": is_replay,
+        "idempotent_replay": False,
         "processing_ms": processing_ms,
         "ingestion_id": ingestion_id,
         "pipeline_version": pipeline_version,
     }
-
-    if is_replay:
-        _log_event(
-            logging.INFO,
-            "idempotent_replay_detected",
-            ingestion_id=ingestion_id,
-            record_id=record_id,
-            dedup_key=dedup_key,
-        )
-        return {
-            **response_meta,
-            "output_saved": False,
-            "sheets_saved": False,
-            "sheets_status": "skipped:idempotent_replay",
-            "sheets_error": None,
-            "duplicate": True,
-        }
 
     record = {
         "record_id": record_id,
@@ -477,7 +435,9 @@ def output_node(state: TriageState) -> Dict[str, Any]:
             _normalize_confidence(state.get("confidence", 0.0), default=0.0)
         ),
         "confidence_source": state.get("confidence_source", "model"),
+        "classification_model": state.get("classification_model", ""),
         "classification_guardrail_flags": state.get("classification_guardrail_flags", []),
+        "enrichment_model": state.get("enrichment_model", ""),
         "enrichment_guardrail_flags": state.get("enrichment_guardrail_flags", []),
         "core_issue": state.get("core_issue", ""),
         "identifiers": state.get("identifiers", []),
@@ -506,6 +466,7 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         **response_meta,
         "output_saved": True,
         "record": record,  # Include record for background tasks
+        "duplicate": False,
     }
 
 

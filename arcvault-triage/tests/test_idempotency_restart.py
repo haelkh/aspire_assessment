@@ -1,4 +1,4 @@
-"""Idempotency replay behavior across store reinitialization."""
+"""Repeated request persistence behavior across store reinitialization."""
 
 from pathlib import Path
 
@@ -37,7 +37,7 @@ def _state() -> dict:
     }
 
 
-def test_duplicate_request_replay_survives_store_reinit(
+def test_duplicate_request_persists_after_store_reinit(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -57,5 +57,6 @@ def test_duplicate_request_replay_survives_store_reinit(
     # Simulate process restart by reinitializing singleton from existing DB.
     reset_idempotency_store_for_tests(str(db_path))
     second = output_node(_state())
-    assert second["output_saved"] is False
-    assert second["idempotent_replay"] is True
+    assert second["output_saved"] is True
+    assert second["idempotent_replay"] is False
+    assert second["record_id"] != first["record_id"]

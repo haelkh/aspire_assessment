@@ -22,9 +22,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Retry configuration
-MAX_RETRIES = 3
-BASE_DELAY_SECONDS = 1.0
-MAX_JITTER_SECONDS = 0.5
+MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
+BASE_DELAY_SECONDS = float(os.getenv("GEMINI_BASE_DELAY_SECONDS", "1.0"))
+MAX_JITTER_SECONDS = float(os.getenv("GEMINI_MAX_JITTER_SECONDS", "0.5"))
 DEFAULT_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 
@@ -176,6 +176,10 @@ class GeminiClient:
                 f"Gemini API error after {MAX_RETRIES} attempts on model "
                 f"'{self._model_name}': {str(e)}"
             )
+
+    def get_model_name(self) -> str:
+        """Return the currently active Gemini model name."""
+        return self._model_name
 
     def generate_json(self, prompt: str, max_tokens: int = 1024) -> dict:
         """

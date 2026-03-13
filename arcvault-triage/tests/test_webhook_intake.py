@@ -39,6 +39,47 @@ def _fake_result(message: str, source: str, metadata: dict | None = None) -> dic
     }
 
 
+def _fake_result_with_record(
+    message: str,  # noqa: ARG001
+    source: str,  # noqa: ARG001
+    metadata: dict | None = None,
+) -> dict:
+    metadata = metadata or {}
+    return {
+        "source": "Email",
+        "message": "Login fails for users.",
+        "category": "Bug Report",
+        "priority": "High",
+        "confidence": 0.91,
+        "confidence_level": "High",
+        "confidence_source": "model",
+        "classification_guardrail_flags": [],
+        "proposed_queue": "Engineering",
+        "destination_queue": "Engineering",
+        "escalation_flag": False,
+        "escalation_rules_triggered": [],
+        "escalation_rule_evidence": [],
+        "escalation_reason": None,
+        "core_issue": "Login failure",
+        "identifiers": ["403"],
+        "urgency_signal": "Production issue",
+        "human_summary": "Users are blocked from logging in.",
+        "timestamp": "2026-03-12T00:00:00",
+        "record_id": "abc123def4567890",
+        "pipeline_version": "1.1.0",
+        "processing_ms": 12.0,
+        "idempotent_replay": False,
+        "ingestion_id": metadata.get("ingestion_id"),
+        "request_id": metadata.get("request_id"),
+        "record": {
+            "record_id": "abc123def4567890",
+            "ingestion_id": metadata.get("ingestion_id"),
+            "source": "Email",
+            "message": "Login fails for users.",
+        },
+    }
+
+
 def test_health_endpoint() -> None:
     client = TestClient(webhook_api.app)
     response = client.get("/health")
@@ -139,6 +180,39 @@ def test_intake_accepts_valid_api_key_when_enforced(monkeypatch) -> None:
     assert response.json()["category"] == "Bug Report"
     assert response.json()["confidence_level"] == "High"
     assert response.json()["confidence_source"] == "model"
+
+
+def test_intake_queues_google_sheets_offload_when_record_exists(monkeypatch) -> None:
+    monkeypatch.delenv("INTAKE_API_KEY", raising=False)
+    monkeypatch.setattr(webhook_api, "process_message", _fake_result_with_record)
+
+    written_records: list[dict] = []
+
+    def _fake_background_sheets_write(record: dict) -> None:
+        written_records.append(record)
+
+    monkeypatch.setattr(
+        webhook_api,
+        "background_sheets_write",
+        _fake_background_sheets_write,
+    )
+
+    client = TestClient(webhook_api.app)
+    response = client.post(
+        "/intake",
+        json={
+            "source": "Email",
+            "message": "Login fails for users.",
+            "request_id": "REQ-321",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sheets_status"] == "pending"
+    assert body["sheets_saved"] is None
+    assert len(written_records) == 1
+    assert written_records[0]["record_id"] == "abc123def4567890"
 
 
 def test_intake_invalid_source_returns_validation_error() -> None:

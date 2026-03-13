@@ -63,6 +63,8 @@ def test_output_record_contains_required_fields(tmp_path: Path, monkeypatch) -> 
 
     assert result["output_saved"] is True
     assert "timestamp" in result
+    assert "record" in result
+    assert result["record"]["record_id"] == result["record_id"]
 
     output_path = tmp_path / "output" / "processed_records.jsonl"
     assert output_path.exists()
@@ -102,7 +104,7 @@ def test_output_record_contains_required_fields(tmp_path: Path, monkeypatch) -> 
 
 
 def test_record_id_present_in_output(tmp_path: Path, monkeypatch) -> None:
-    """Output records must include a deterministic record_id."""
+    """Output records must include a generated record_id."""
     monkeypatch.chdir(tmp_path)
     reset_idempotency_store_for_tests(str(tmp_path / "output" / "triage_state.db"))
     monkeypatch.setattr(
@@ -117,8 +119,8 @@ def test_record_id_present_in_output(tmp_path: Path, monkeypatch) -> None:
     assert len(result["record_id"]) == 16
 
 
-def test_deduplication_prevents_duplicate_records(tmp_path: Path, monkeypatch) -> None:
-    """Processing the same message twice should only write one record."""
+def test_repeated_requests_persist_as_new_records(tmp_path: Path, monkeypatch) -> None:
+    """Processing the same message twice should write two independent records."""
     monkeypatch.chdir(tmp_path)
     reset_idempotency_store_for_tests(str(tmp_path / "output" / "triage_state.db"))
     monkeypatch.setattr(
@@ -133,14 +135,16 @@ def test_deduplication_prevents_duplicate_records(tmp_path: Path, monkeypatch) -
     result1 = output_node(state)
     assert result1["output_saved"] is True
     assert result1["idempotent_replay"] is False
+    assert result1.get("duplicate") is False
 
-    # Second call with the same content should be marked as replay.
+    # Second call with the same content should still be persisted.
     result2 = output_node(state)
-    assert result2.get("duplicate") is True
-    assert result2["output_saved"] is False
-    assert result2["idempotent_replay"] is True
+    assert result2["output_saved"] is True
+    assert result2["idempotent_replay"] is False
+    assert result2.get("duplicate") is False
+    assert result2["record_id"] != result1["record_id"]
 
-    # Only one record should be persisted.
+    # Two records should be persisted.
     output_path = tmp_path / "output" / "processed_records.jsonl"
     records = _read_jsonl(output_path)
-    assert len(records) == 1
+    assert len(records) == 2

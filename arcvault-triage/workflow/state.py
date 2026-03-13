@@ -74,6 +74,9 @@ class TriageState(TypedDict, total=False):
     confidence_source: str
     """Confidence origin marker. Current value: model."""
 
+    classification_model: str
+    """Gemini model used for the classification step."""
+
     classification_guardrail_flags: list[str]
     """Validation and parsing guardrail flags captured during classification."""
 
@@ -92,6 +95,9 @@ class TriageState(TypedDict, total=False):
     2-3 sentence summary for the receiving team.
     Should explain the issue in plain language.
     """
+
+    enrichment_model: str
+    """Gemini model used for the enrichment step."""
 
     enrichment_guardrail_flags: list[str]
     """Validation and parsing guardrail flags captured during enrichment."""
@@ -137,6 +143,9 @@ class TriageState(TypedDict, total=False):
 
     output_saved: bool
     """Whether local output persistence wrote a new JSONL row."""
+
+    record: dict[str, Any]
+    """Full persisted record payload used by API layers for Sheets offload."""
 
     sheets_saved: bool
     """Whether a Google Sheets row was written for this run."""

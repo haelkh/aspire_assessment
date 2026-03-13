@@ -192,6 +192,8 @@ def batch_run(background_tasks: BackgroundTasks) -> Dict[str, Any]:
                     "confidence": result.get("confidence"),
                     "confidence_level": result.get("confidence_level"),
                     "confidence_source": result.get("confidence_source"),
+                    "classification_model": result.get("classification_model"),
+                    "enrichment_model": result.get("enrichment_model"),
                     "destination_queue": result.get("destination_queue"),
                     "escalation_flag": result.get("escalation_flag"),
                     "idempotent_replay": result.get("idempotent_replay"),

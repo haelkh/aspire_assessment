@@ -9,7 +9,7 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from config.settings import (
@@ -20,6 +20,7 @@ from config.settings import (
     MAX_REQUEST_ID_LENGTH,
 )
 from workflow.graph import process_message
+from workflow.nodes import background_sheets_write
 
 # Rate limiting configuration
 RATE_LIMIT_WINDOW_SECONDS = 60
@@ -112,7 +113,11 @@ def health() -> dict:
 
 
 @app.post("/intake")
-def intake(payload: IntakeRequest, request: Request) -> dict:
+def intake(
+    payload: IntakeRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict:
     """
     Intake a support request and run triage automatically.
 
@@ -139,6 +144,16 @@ def intake(payload: IntakeRequest, request: Request) -> dict:
         detail = str(exc) or "Processing failed."
         status_code = 502 if "Classification failed guardrails" in detail else 500
         raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    # Queue Google Sheets write in background if this run produced a new record.
+    record = result.pop("record", None)
+    if record and not result.get("idempotent_replay"):
+        background_tasks.add_task(background_sheets_write, record)
+        result["sheets_saved"] = None
+        result["sheets_status"] = "pending"
+    else:
+        result["sheets_saved"] = False
+        result["sheets_status"] = "skipped"
 
     result["ingestion_id"] = ingestion_id
     result["request_id"] = request_id

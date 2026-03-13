@@ -87,22 +87,26 @@ function setStatus(message, isError = false) {
  * Builds a user-facing status line for processing + Sheets outcomes.
  */
 function buildProcessingStatus(result) {
+  const classifyModel = result.classification_model || "unknown";
+  const enrichModel = result.enrichment_model || "unknown";
+  const modelSuffix = ` Models: classify=${classifyModel}, enrich=${enrichModel}.`;
+
   if (result.idempotent_replay) {
-    return "Processed as idempotent replay; no new Sheets row was written. Change Request ID (or message) for a fresh row.";
+    return `Processed as idempotent replay; no new Sheets row was written. Change Request ID (or message) for a fresh row.${modelSuffix}`;
   }
 
   if (result.sheets_saved === true) {
-    return "Processed successfully. Google Sheets row saved.";
+    return `Processed successfully. Google Sheets row saved.${modelSuffix}`;
   }
 
   if (result.sheets_status === "pending") {
-    return "Processed successfully. Google Sheets row is being saved in background.";
+    return `Processed successfully. Google Sheets row is being saved in background.${modelSuffix}`;
   }
 
   const sheetsError = result.sheets_error
     ? ` Sheets error: ${result.sheets_error}`
     : "";
-  return `Processed, but Google Sheets write was skipped or failed.${sheetsError}`;
+  return `Processed, but Google Sheets write was skipped or failed.${sheetsError}${modelSuffix}`;
 }
 
 /**
