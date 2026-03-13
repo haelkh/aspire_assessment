@@ -9,13 +9,14 @@ import json
 import os
 from typing import Any, Dict, List, Tuple
 
-import gradio as gr
 from dotenv import load_dotenv
 
-from workflow.graph import process_message
-
-# Load environment variables
+# Load environment variables FIRST, before importing any LangChain/LangGraph modules
 load_dotenv()
+
+import gradio as gr
+
+from workflow.graph import process_message
 
 
 def load_samples() -> List[Dict[str, Any]]:
@@ -108,7 +109,6 @@ def batch_process_all() -> Tuple[str, str]:
 
 with gr.Blocks(
     title="ArcVault Triage System",
-    theme=gr.themes.Soft(),
 ) as demo:
     gr.Markdown(
         """
@@ -206,6 +206,7 @@ def main() -> None:
         server_port=7860,
         share=False,
         show_error=True,
+        theme=gr.themes.Soft(),
     )
 
 
