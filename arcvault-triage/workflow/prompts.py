@@ -3,6 +3,9 @@ Prompt templates for the ArcVault Triage workflow.
 
 This module contains the prompts used for LLM-based classification
 and enrichment of customer support messages.
+
+Design rationale and tradeoffs are documented in
+prompts/prompt_documentation.md (single source of truth).
 """
 
 # === Classification Prompt ===
@@ -30,6 +33,28 @@ Assign confidence:
 - 1.0 = Very confident, clear-cut case
 - 0.5 = Moderate confidence, could go either way
 - 0.0 = Very uncertain, need human review
+
+### Examples
+
+Example 1 (Bug Report vs Incident/Outage — note the distinction):
+MESSAGE SOURCE: Email
+MESSAGE CONTENT: I can't access my dashboard since this morning. Getting a 500 error on every page.
+{{"category": "Bug Report", "priority": "High", "confidence": 0.85}}
+Rationale: Single user affected with a specific error code points to Bug Report, not Incident/Outage.
+
+Example 2 (Incident/Outage — multiple users, service-level impact):
+MESSAGE SOURCE: Support Portal
+MESSAGE CONTENT: Our entire team is locked out of ArcVault. None of us can reach the login page. Started 30 min ago.
+{{"category": "Incident/Outage", "priority": "High", "confidence": 0.95}}
+Rationale: Multiple users, complete service unavailability, time-bounded onset = Incident/Outage.
+
+Example 3 (Billing Issue — not a Feature Request even though they mention improvement):
+MESSAGE SOURCE: Web Form
+MESSAGE CONTENT: We were charged $2,100 this month but our plan is $1,500. Also, it would be nice to see a billing breakdown by department.
+{{"category": "Billing Issue", "priority": "High", "confidence": 0.80}}
+Rationale: Primary intent is disputing an overcharge. The feature suggestion is secondary.
+
+### Now classify this message
 
 Return JSON in this exact format:
 {{"category": "<category>", "priority": "<priority>", "confidence": <float>}}"""
@@ -59,69 +84,13 @@ Extract the following information and return ONLY valid JSON with no additional 
    - What action might be needed
    Write this as if you're briefing a colleague who will handle this ticket.
 
+### Example
+
+MESSAGE: We're seeing error code ERR_SYNC_FAIL on account acme-corp-99 when syncing audit logs. Started after your v3.2 release.
+CLASSIFICATION: Bug Report (Priority: High)
+{{"core_issue": "Audit log sync fails with ERR_SYNC_FAIL after v3.2 release.", "identifiers": ["ERR_SYNC_FAIL", "acme-corp-99", "v3.2"], "urgency_signal": "Compliance-related feature broken after a release could affect audit readiness.", "human_summary": "Customer acme-corp-99 reports that audit log syncing fails with ERR_SYNC_FAIL since the v3.2 release. This may affect their compliance workflows. Engineering should investigate the sync pipeline for regressions introduced in v3.2."}}
+
+### Now extract from this message
+
 Return JSON in this exact format:
 {{"core_issue": "<one sentence>", "identifiers": ["<id1>", "<id2>"], "urgency_signal": "<explanation or None>", "human_summary": "<2-3 sentences>"}}"""
-
-
-# === Prompt Design Documentation ===
-PROMPT_DESIGN_RATIONALE = {
-    "classification": """
-## Classification Prompt Design Rationale
-
-### Why This Structure?
-1. **Clear Category Definitions**: Each category has explicit examples to reduce ambiguity.
-   This helps the model distinguish between similar categories (e.g., Bug Report vs Incident/Outage).
-
-2. **JSON-Only Output**: By requiring "ONLY valid JSON with no additional text", we eliminate
-   parsing issues. The model won't wrap output in markdown code blocks or add explanations.
-
-3. **Confidence Scoring**: The explicit confidence scale (0.0-1.0 with examples) helps the model
-   calibrate its uncertainty. This enables our escalation logic for low-confidence cases.
-
-4. **Source Context**: Including the message source (Email, Web Form, Support Portal) provides
-   context that can affect classification. For example, emails tend to be more formal.
-
-### Tradeoffs Made
-- **Simplicity vs Nuance**: Used 5 broad categories instead of 10+ specific ones. This reduces
-  classification errors but may require human review for edge cases.
-- **No Few-Shot Examples**: Chose not to include example classifications to save tokens and
-  avoid biasing the model toward specific patterns. With more time, I'd add 2-3 examples.
-
-### What I'd Change With More Time
-1. Add 2-3 few-shot examples for each category
-2. Implement a two-stage classification (first broad, then specific subcategory)
-3. Add language detection for multilingual support
-4. Include sentiment analysis in the classification step
-""",
-    "enrichment": """
-## Enrichment Prompt Design Rationale
-
-### Why This Structure?
-1. **Separate from Classification**: Enrichment is a distinct step because:
-   - Different cognitive task (extraction vs classification)
-   - Can use classification results as context
-   - Allows for different model or parameters if needed
-
-2. **Structured Extraction**: The four fields (core_issue, identifiers, urgency_signal, human_summary)
-   provide exactly what downstream teams need without overwhelming them.
-
-3. **Identifier Extraction**: Explicitly listing what counts as an identifier helps the model
-   find relevant information that could be used for automated lookups.
-
-4. **Human-First Summary**: The human_summary is written for humans, not machines. This is what
-   support teams will actually read, so it's prioritized.
-
-### Tradeoffs Made
-- **Word Limits**: Added max word counts to prevent verbose outputs that waste tokens and
-  overwhelm readers. This trades detail for clarity.
-- **Single core_issue**: Limited to one sentence to force focus. With more time, I'd allow
-  a list of issues for complex messages.
-
-### What I'd Change With More Time
-1. Add entity recognition for dates, times, and monetary amounts
-2. Implement multi-language support for international customers
-3. Add suggested actions based on the issue type
-4. Include customer sentiment score
-5. Extract and validate any URLs or email addresses
-"""
-}

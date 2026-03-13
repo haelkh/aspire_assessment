@@ -33,6 +33,28 @@ Assign confidence:
 - 0.5 = Moderate confidence, could go either way
 - 0.0 = Very uncertain, need human review
 
+### Examples
+
+Example 1 (Bug Report vs Incident/Outage — note the distinction):
+MESSAGE SOURCE: Email
+MESSAGE CONTENT: I can't access my dashboard since this morning. Getting a 500 error on every page.
+{"category": "Bug Report", "priority": "High", "confidence": 0.85}
+Rationale: Single user affected with a specific error code points to Bug Report, not Incident/Outage.
+
+Example 2 (Incident/Outage — multiple users, service-level impact):
+MESSAGE SOURCE: Support Portal
+MESSAGE CONTENT: Our entire team is locked out of ArcVault. None of us can reach the login page. Started 30 min ago.
+{"category": "Incident/Outage", "priority": "High", "confidence": 0.95}
+Rationale: Multiple users, complete service unavailability, time-bounded onset = Incident/Outage.
+
+Example 3 (Billing Issue — not a Feature Request even though they mention improvement):
+MESSAGE SOURCE: Web Form
+MESSAGE CONTENT: We were charged $2,100 this month but our plan is $1,500. Also, it would be nice to see a billing breakdown by department.
+{"category": "Billing Issue", "priority": "High", "confidence": 0.80}
+Rationale: Primary intent is disputing an overcharge. The feature suggestion is secondary.
+
+### Now classify this message
+
 Return JSON in this exact format:
 {"category": "<category>", "priority": "<priority>", "confidence": <float>}
 ```
@@ -41,17 +63,21 @@ Return JSON in this exact format:
 
 This prompt uses a strict enum-style output and a hard JSON contract so routing logic can stay deterministic and parseable. It front-loads category definitions and priority criteria to reduce ambiguity on edge cases, and asks for calibrated confidence because confidence drives escalation decisions. The wording stays compact to reduce token cost while preserving enough context to separate similar labels such as `Bug Report` vs `Incident/Outage`.
 
+**Few-shot examples** were added to resolve the most common ambiguity points: (1) single-user bug vs multi-user outage, (2) billing complaint with a secondary feature request, and (3) clarity on confidence calibration. Examples use realistic messages with brief rationale so the model understands the decision boundary, not just the answer.
+
+**Structured output mode** (`response_mime_type="application/json"`) is used at the API level to guarantee valid JSON responses, eliminating the need for markdown-stripping or regex extraction in the common case. A fallback extraction path remains for compatibility.
+
 ### Tradeoffs
 
 - We intentionally use fixed categories instead of open classification, which improves consistency but limits expressiveness.
-- We do not use few-shot examples, which saves tokens but can reduce edge-case accuracy.
+- Few-shot examples are deliberately limited to 3 to keep token cost low while covering the most impactful ambiguity points.
 - Confidence is self-reported by the model, so application-side guardrails are required (implemented in `workflow/nodes.py`).
 
 ### What I Would Improve With More Time
 
-- Add a few-shot section for ambiguous scenarios.
 - Add subcategory prediction in a second pass.
 - Add confidence calibration checks against historical outcomes.
+- Add sentiment analysis for customer satisfaction signals.
 
 ## Prompt 2 - Enrichment and Summary
 
@@ -76,6 +102,14 @@ Extract the following information and return ONLY valid JSON with no additional 
 3. urgency_signal: Briefly explain WHY this might be urgent, or "None" if not urgent
 4. human_summary: 2-3 sentences (max 100 words total) that a support team member can read quickly
 
+### Example
+
+MESSAGE: We're seeing error code ERR_SYNC_FAIL on account acme-corp-99 when syncing audit logs. Started after your v3.2 release.
+CLASSIFICATION: Bug Report (Priority: High)
+{"core_issue": "Audit log sync fails with ERR_SYNC_FAIL after v3.2 release.", "identifiers": ["ERR_SYNC_FAIL", "acme-corp-99", "v3.2"], "urgency_signal": "Compliance-related feature broken after a release could affect audit readiness.", "human_summary": "Customer acme-corp-99 reports that audit log syncing fails with ERR_SYNC_FAIL since the v3.2 release. This may affect their compliance workflows. Engineering should investigate the sync pipeline for regressions introduced in v3.2."}
+
+### Now extract from this message
+
 Return JSON in this exact format:
 {"core_issue": "<one sentence>", "identifiers": ["<id1>", "<id2>"], "urgency_signal": "<explanation or None>", "human_summary": "<2-3 sentences>"}
 ```
@@ -83,6 +117,8 @@ Return JSON in this exact format:
 ### Why It Is Structured This Way
 
 This prompt is separated from classification to keep each model task focused: classification decides ownership and risk, enrichment extracts actionable context. The schema is intentionally minimal and practical for downstream teams, with one short issue sentence, explicit identifiers, an urgency hint, and a human-readable summary. The JSON-only requirement keeps it machine-safe, while the colleague-briefing style instruction keeps summaries useful in real support operations.
+
+A single **few-shot example** demonstrates ideal extraction density — showing how to identify error codes, account IDs, and version references within a realistic message. This helps the model calibrate the level of detail expected, particularly for the `identifiers` field where under-extraction is common without examples.
 
 ### Tradeoffs
 
@@ -99,5 +135,7 @@ This prompt is separated from classification to keep each model task focused: cl
 ## Prompt/Code Alignment
 
 - Prompt output contracts are validated and sanitized in `workflow/nodes.py`.
+- **Structured output mode** at the API level guarantees valid JSON in the common case.
+- **Retry with exponential backoff** handles transient API failures (3 attempts, 1s/2s/4s with jitter).
 - Invalid enums or malformed JSON cannot break routing.
 - Low-confidence or uncertain outputs are intentionally pushed into human review.

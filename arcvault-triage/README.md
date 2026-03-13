@@ -5,13 +5,13 @@ Built for the Valsoft AI Engineer assessment using free/open-source tooling.
 
 ## What This Implements
 
-- Automatic ingestion via webhook (`POST /intake`)
-- LLM classification into required categories and priority
+- Automatic ingestion via webhook (`POST /intake`) with rate limiting
+- LLM classification into required categories and priority (with few-shot examples)
 - Confidence scoring with guarded parsing and fallback behavior
 - Enrichment (core issue, identifiers, urgency signal, team-ready summary)
 - Routing with `proposed_queue` and final `destination_queue`
 - Escalation to a separate queue (`Human Review`) for low-confidence or rule-based cases
-- Structured output to local JSON and optional Google Sheets
+- Structured output to local JSON (with deduplication) and optional Google Sheets
 - Deterministic submission artifact generation for exactly 5 required samples
 
 ## Workflow
@@ -23,6 +23,18 @@ Escalation rules:
 - confidence `< 0.70`
 - keyword match (for example `outage`, `down for all users`, `multiple users affected`)
 - billing amount delta `> $500` for `Billing Issue`
+
+## Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **LangGraph** over raw Python | Provides typed state management, conditional branching, and a visual graph structure that maps directly to the pipeline steps. Makes it easy to add/reorder nodes without refactoring control flow. |
+| **`proposed_queue` + `destination_queue`** | Separates classification intent from final routing. Escalated records still show which team *should* own them (`proposed_queue`), while `destination_queue` reflects that they need human review first. |
+| **Escalation rule composition** | Multiple independent rules (confidence, keywords, billing delta) are evaluated and accumulated. All triggered rules are recorded in machine-readable and human-readable formats for audit and debugging. |
+| **Word-boundary keyword matching** | Uses `\b` regex boundaries instead of substring `in` to prevent false positives (e.g., "I'm down for that" matching "down"). |
+| **Gemini structured output mode** | `response_mime_type="application/json"` guarantees valid JSON at the API level, with a fallback extraction path for compatibility. |
+| **Retry with exponential backoff** | 3 attempts with 1s/2s/4s delays + jitter for resilience against transient Gemini API failures. |
+| **Deduplication** | SHA-256 hash of `(source, message)` prevents duplicate records from repeated processing. |
 
 ## Tech Stack
 

@@ -79,27 +79,30 @@ def load_sample(sample_id: int) -> Tuple[str, str]:
 
 
 def batch_process_all() -> Tuple[str, str]:
-    """Process all sample messages and return a compact markdown summary."""
-    results = []
+    """Process all sample messages and return a formatted markdown summary."""
+    lines = ["## Batch Results\n"]
 
     for index, sample in enumerate(SAMPLES, 1):
         try:
             result = process_message(sample["message"], sample["source"])
-            summary = (
-                f"**Sample {index}** ({sample['source']})\n"
-                f"- Category: {result.get('category')}\n"
-                f"- Priority: {result.get('priority')}\n"
-                f"- Confidence: {result.get('confidence'):.2%}\n"
-                f"- Proposed Queue: {result.get('proposed_queue')}\n"
-                f"- Final Queue: {result.get('destination_queue')}\n"
-                f"- Escalation: {'YES' if result.get('escalation_flag') else 'NO'}\n"
-                f"- Core Issue: {result.get('core_issue')}\n"
+            escalation = "🚨 YES" if result.get("escalation_flag") else "✅ NO"
+            lines.append(
+                f"### Sample {index} ({sample['source']})\n"
+                f"| Field | Value |\n"
+                f"|---|---|\n"
+                f"| Category | {result.get('category')} |\n"
+                f"| Priority | {result.get('priority')} |\n"
+                f"| Confidence | {result.get('confidence', 0):.2%} |\n"
+                f"| Proposed Queue | {result.get('proposed_queue')} |\n"
+                f"| Final Queue | {result.get('destination_queue')} |\n"
+                f"| Escalation | {escalation} |\n"
+                f"| Core Issue | {result.get('core_issue')} |\n"
+                f"| Summary | {result.get('human_summary')} |\n"
             )
-            results.append(summary)
         except Exception as exc:  # pragma: no cover - integration behavior
-            results.append(f"**Sample {index}**: Error - {exc}")
+            lines.append(f"### Sample {index}: ❌ Error — {exc}\n")
 
-    full_summary = "\n".join(results)
+    full_summary = "\n".join(lines)
     return full_summary, f"Processed {len(SAMPLES)} samples."
 
 
@@ -152,12 +155,7 @@ with gr.Blocks(
 
             status_output = gr.Textbox(label="Status", interactive=False, lines=1)
             results_json = gr.JSON(label="Processed Record", height=420)
-            batch_output = gr.Textbox(
-                label="Batch Results",
-                interactive=False,
-                lines=16,
-                visible=False,
-            )
+            batch_output = gr.Markdown(label="Batch Results", visible=False)
 
     process_btn.click(
         fn=process_single_message,

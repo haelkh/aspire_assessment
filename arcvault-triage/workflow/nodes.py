@@ -5,6 +5,7 @@ This module contains the node functions that process messages
 through the triage pipeline using LangGraph.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,25 @@ from config.settings import (
 
 DEFAULT_CATEGORY = "Technical Question"
 DEFAULT_PRIORITY = "Medium"
+
+# In-memory deduplication set (source + message hash)
+_processed_hashes: set = set()
+
+
+def _generate_record_id(source: str, message: str) -> str:
+    """Generate a deterministic record ID from source and message."""
+    content = f"{source}:{message}".encode("utf-8")
+    return hashlib.sha256(content).hexdigest()[:16]
+
+
+def _is_duplicate(record_id: str) -> bool:
+    """Check if a record has already been processed."""
+    return record_id in _processed_hashes
+
+
+def _mark_processed(record_id: str) -> None:
+    """Mark a record as processed."""
+    _processed_hashes.add(record_id)
 
 
 def _normalize_confidence(value: Any, default: float = 0.5) -> float:
@@ -55,6 +75,12 @@ def _extract_dollar_amounts(message: str) -> List[float]:
             continue
 
     return amounts
+
+
+def _keyword_matches(message_lower: str, keyword: str) -> bool:
+    """Check if a keyword matches using word boundaries to avoid false positives."""
+    pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
+    return bool(re.search(pattern, message_lower))
 
 
 def _build_escalation_reason(rules: List[str], confidence: float) -> str | None:
@@ -206,7 +232,7 @@ def route_node(state: TriageState) -> Dict[str, Any]:
 
     Escalation criteria:
     - Confidence below threshold
-    - Escalation keywords in message
+    - Escalation keywords in message (word-boundary matched)
     - Billing issue with dollar amount delta above configured threshold
     """
     category = state.get("category", DEFAULT_CATEGORY)
@@ -222,7 +248,7 @@ def route_node(state: TriageState) -> Dict[str, Any]:
 
     matched_keywords: List[str] = []
     for keyword in ESCALATION_KEYWORDS:
-        if keyword.lower() in message_lower:
+        if _keyword_matches(message_lower, keyword):
             matched_keywords.append(keyword)
             escalation_rules_triggered.append(f"keyword:{keyword}")
 
@@ -253,14 +279,28 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     Write the processed record to output destinations.
 
     This node writes:
-    - Local JSON runtime log (append-only)
+    - Local JSON runtime log (append-only, with deduplication)
     - Google Sheets row (if configured)
     """
     from integrations.sheets_client import get_sheets_client
 
     timestamp = datetime.now().isoformat()
+    record_id = _generate_record_id(
+        state.get("source", ""), state.get("message", "")
+    )
+
+    # Deduplication check
+    if _is_duplicate(record_id):
+        return {
+            "timestamp": timestamp,
+            "record_id": record_id,
+            "output_saved": False,
+            "sheets_saved": False,
+            "duplicate": True,
+        }
 
     record = {
+        "record_id": record_id,
         "timestamp": timestamp,
         "source": state.get("source", ""),
         "message": state.get("message", ""),
@@ -270,7 +310,7 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         "core_issue": state.get("core_issue", ""),
         "identifiers": state.get("identifiers", []),
         "urgency_signal": state.get("urgency_signal", ""),
-        "proposed_queue": state.get("proposed_queue", state.get("destination_queue", "")),
+        "proposed_queue": state.get("proposed_queue", ""),
         "destination_queue": state.get("destination_queue", ""),
         "escalation_flag": state.get("escalation_flag", False),
         "escalation_rules_triggered": state.get("escalation_rules_triggered", []),
@@ -295,6 +335,8 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     with open(output_file, "w", encoding="utf-8") as file_handle:
         json.dump(existing_records, file_handle, indent=2, ensure_ascii=False)
 
+    _mark_processed(record_id)
+
     try:
         sheets_client = get_sheets_client()
         sheets_client.append_record(record)
@@ -305,6 +347,7 @@ def output_node(state: TriageState) -> Dict[str, Any]:
 
     return {
         "timestamp": timestamp,
+        "record_id": record_id,
         "output_saved": True,
         "sheets_saved": sheets_success,
     }

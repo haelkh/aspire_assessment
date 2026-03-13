@@ -5,6 +5,7 @@ This module defines the workflow graph that orchestrates
 the message triage pipeline.
 """
 
+import threading
 from typing import Literal
 from langgraph.graph import StateGraph, END
 
@@ -108,18 +109,21 @@ def process_message(message: str, source: str) -> dict:
     return result
 
 
-# Module-level workflow instance (compiled once)
+# Module-level workflow instance (compiled once, thread-safe)
 _workflow = None
+_workflow_lock = threading.Lock()
 
 
 def get_workflow():
     """
-    Get or create the compiled workflow instance.
+    Get or create the compiled workflow instance (thread-safe).
 
     Returns:
         Compiled LangGraph workflow.
     """
     global _workflow
     if _workflow is None:
-        _workflow = build_workflow()
+        with _workflow_lock:
+            if _workflow is None:
+                _workflow = build_workflow()
     return _workflow

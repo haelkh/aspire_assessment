@@ -24,10 +24,11 @@ ESCALATION_KEYWORDS = [
     "billing error",
     "security breach",
     "data loss",
-    "critical",
-    "urgent",
+    "critical issue",
+    "critical failure",
+    "urgent issue",
     "multiple users affected",
-    "system down"
+    "system down",
 ]
 
 # === Category Definitions ===
