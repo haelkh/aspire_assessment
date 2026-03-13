@@ -90,6 +90,7 @@ class SheetsClient:
         self._client = None
         self._sheet = None
         self._headers_ready = False
+        self._header_column_map: Dict[str, int] = {}
 
     @staticmethod
     def _column_letter(index: int) -> str:
@@ -108,13 +109,17 @@ class SheetsClient:
         end_col = self._column_letter(len(self.HEADERS))
         return f"A1:{end_col}1"
 
-    def _row_range(self, row_number: int) -> str:
-        end_col = self._column_letter(len(self.HEADERS))
+    def _row_range(self, row_number: int, end_column: int) -> str:
+        end_col = self._column_letter(end_column)
         return f"A{row_number}:{end_col}{row_number}"
 
-    def _rows_range(self, start_row: int, end_row: int) -> str:
-        end_col = self._column_letter(len(self.HEADERS))
+    def _rows_range(self, start_row: int, end_row: int, end_column: int) -> str:
+        end_col = self._column_letter(end_column)
         return f"A{start_row}:{end_col}{end_row}"
+
+    @staticmethod
+    def _normalize_header_name(value: str) -> str:
+        return " ".join(str(value).strip().lower().split())
 
     def _trim_or_pad_headers(self, headers: List[str]) -> List[str]:
         expected_len = len(self.HEADERS)
@@ -125,19 +130,86 @@ class SheetsClient:
 
         return normalized[:expected_len]
 
+    def _build_header_column_map(self, headers: List[str]) -> Dict[str, int]:
+        """
+        Build a map from expected header name to 1-based column index in sheet.
+
+        Raises:
+            ValueError: if a required header is missing.
+        """
+        name_to_indexes: Dict[str, List[int]] = {}
+        for index, header in enumerate(headers, start=1):
+            normalized = self._normalize_header_name(header)
+            if not normalized:
+                continue
+            name_to_indexes.setdefault(normalized, []).append(index)
+
+        column_map: Dict[str, int] = {}
+        missing: List[str] = []
+        for expected in self.HEADERS:
+            normalized_expected = self._normalize_header_name(expected)
+            indexes = name_to_indexes.get(normalized_expected, [])
+            if not indexes:
+                missing.append(expected)
+                continue
+            # If a header appears multiple times, use the left-most match.
+            column_map[expected] = indexes[0]
+
+        if missing:
+            details: List[str] = []
+            if missing:
+                details.append(
+                    "missing: " + ", ".join(f"'{name}'" for name in missing[:5])
+                )
+            detail_text = "; ".join(details) if details else "invalid headers"
+            raise ValueError(
+                "Google Sheets headers mismatch in row 1. "
+                f"Expected headers could not be resolved ({detail_text})."
+            )
+
+        return column_map
+
+    def _serialize_row_by_header_map(self, row_values: List[str]) -> List[str]:
+        """
+        Serialize a logical row into sheet column order based on header mapping.
+
+        The returned list always starts at column A and extends to the rightmost
+        expected header column currently present in row 1.
+        """
+        if len(row_values) != len(self.HEADERS):
+            raise ValueError(
+                "Row length mismatch for Google Sheets write. "
+                f"Expected {len(self.HEADERS)} columns, got {len(row_values)}."
+            )
+
+        if not self._header_column_map:
+            raise ValueError("Google Sheets headers are not initialized.")
+
+        rightmost_column = max(self._header_column_map.values())
+        serialized = [""] * rightmost_column
+
+        for header_name, value in zip(self.HEADERS, row_values):
+            column_index = self._header_column_map[header_name]
+            serialized[column_index - 1] = value
+
+        return serialized
+
     def _ensure_headers(self) -> None:
         """
-        Ensure row 1 contains the exact expected headers in columns A..AA.
+        Ensure row 1 contains all expected headers and build a column map.
 
         Behavior:
         - If row 1 is empty in A..AA, write headers automatically.
-        - If row 1 differs from expected headers, fail loudly.
+        - If row 1 has expected headers in any order, writes are mapped by name.
+        - If headers are invalid and there is no data, row 1 is rewritten.
+        - If headers are invalid and data exists, fail loudly.
         """
         if self._headers_ready:
             return
 
         expected_headers = [header.strip() for header in self.HEADERS]
-        existing_headers = self._trim_or_pad_headers(self._sheet.row_values(1))
+        raw_header_row = [str(value).strip() for value in self._sheet.row_values(1)]
+        existing_headers = self._trim_or_pad_headers(raw_header_row)
 
         if all(value == "" for value in existing_headers):
             self._sheet.update(
@@ -145,28 +217,30 @@ class SheetsClient:
                 values=[expected_headers],
                 value_input_option="RAW",
             )
+            self._header_column_map = {
+                header: index for index, header in enumerate(self.HEADERS, start=1)
+            }
             self._headers_ready = True
             return
 
-        if existing_headers != expected_headers:
-            mismatches: List[str] = []
-            for index, (expected, actual) in enumerate(
-                zip(expected_headers, existing_headers),
-                start=1,
-            ):
-                if expected != actual:
-                    mismatches.append(
-                        f"col {index}: expected '{expected}', found '{actual or '<empty>'}'"
-                    )
-                if len(mismatches) >= 5:
-                    break
-
-            mismatch_summary = "; ".join(mismatches) if mismatches else "unknown mismatch"
-            raise ValueError(
-                "Google Sheets headers mismatch in row 1. "
-                f"Expected range {self._header_range()} to match configured headers. "
-                f"First mismatches: {mismatch_summary}"
-            )
+        try:
+            self._header_column_map = self._build_header_column_map(raw_header_row)
+            self._headers_ready = True
+            return
+        except ValueError as original_error:
+            # Auto-repair when sheet has no data rows yet.
+            if len(self._sheet.get_all_values()) <= 1:
+                self._sheet.update(
+                    range_name=self._header_range(),
+                    values=[expected_headers],
+                    value_input_option="RAW",
+                )
+                self._header_column_map = {
+                    header: index for index, header in enumerate(self.HEADERS, start=1)
+                }
+                self._headers_ready = True
+                return
+            raise original_error
 
         self._headers_ready = True
 
@@ -206,6 +280,7 @@ class SheetsClient:
             self._client = gspread.authorize(credentials)
             self._sheet = self._client.open_by_key(self.spreadsheet_id).sheet1
             self._headers_ready = False
+            self._header_column_map = {}
 
         except ImportError:
             raise ImportError(
@@ -230,17 +305,13 @@ class SheetsClient:
         self._ensure_headers()
 
         # Format the record as a row
-        row = self._format_row(record)
-        if len(row) != len(self.HEADERS):
-            raise ValueError(
-                "Row length mismatch for Google Sheets write. "
-                f"Expected {len(self.HEADERS)} columns, got {len(row)}."
-            )
+        row = self._serialize_row_by_header_map(self._format_row(record))
 
         # Write to an explicit range to prevent table-detection column drift.
         row_number = self._next_row_number()
+        end_column = max(self._header_column_map.values())
         self._sheet.update(
-            range_name=self._row_range(row_number),
+            range_name=self._row_range(row_number, end_column),
             values=[row],
             value_input_option="RAW",
         )
@@ -259,21 +330,15 @@ class SheetsClient:
         self._connect()
         self._ensure_headers()
 
-        rows = [self._format_row(record) for record in records]
+        rows = [self._serialize_row_by_header_map(self._format_row(record)) for record in records]
         if not rows:
             return 0
 
-        for row in rows:
-            if len(row) != len(self.HEADERS):
-                raise ValueError(
-                    "Row length mismatch for Google Sheets batch write. "
-                    f"Expected {len(self.HEADERS)} columns, got {len(row)}."
-                )
-
         start_row = self._next_row_number()
         end_row = start_row + len(rows) - 1
+        end_column = max(self._header_column_map.values())
         self._sheet.update(
-            range_name=self._rows_range(start_row, end_row),
+            range_name=self._rows_range(start_row, end_row, end_column),
             values=rows,
             value_input_option="RAW",
         )

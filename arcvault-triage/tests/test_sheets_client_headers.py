@@ -115,10 +115,26 @@ def test_append_record_initializes_headers_and_writes_explicit_range() -> None:
     assert len(sheet.update_calls[1]["values"][0]) == len(SheetsClient.HEADERS)
 
 
-def test_append_record_raises_when_headers_do_not_match() -> None:
+def test_append_record_repairs_headers_when_no_data_rows_exist() -> None:
     bad_headers = list(SheetsClient.HEADERS)
     bad_headers[3] = "Processing Time"
     sheet = _FakeSheet(rows=[bad_headers])
+    client = _make_client(sheet)
+
+    row_number = client.append_record(_sample_record())
+
+    assert row_number == 2
+    assert len(sheet.update_calls) == 2
+    assert sheet.update_calls[0]["range_name"] == "A1:AA1"
+    assert sheet.update_calls[0]["values"] == [SheetsClient.HEADERS]
+    assert sheet.update_calls[1]["range_name"] == "A2:AA2"
+
+
+def test_append_record_raises_when_invalid_headers_and_data_exist() -> None:
+    bad_headers = list(SheetsClient.HEADERS)
+    bad_headers[3] = "Processing Time"
+    existing_row = ["existing"] + [""] * (len(SheetsClient.HEADERS) - 1)
+    sheet = _FakeSheet(rows=[bad_headers, existing_row])
     client = _make_client(sheet)
 
     with pytest.raises(ValueError, match="headers mismatch"):
@@ -147,3 +163,23 @@ def test_append_records_writes_single_contiguous_range() -> None:
     assert len(sheet.update_calls) == 1
     assert sheet.update_calls[0]["range_name"] == "A2:AA3"
     assert len(sheet.update_calls[0]["values"]) == 2
+
+
+def test_append_record_maps_values_by_header_name_when_order_is_rearranged() -> None:
+    rearranged_headers = list(SheetsClient.HEADERS)
+    message_col = rearranged_headers.pop(10)
+    rearranged_headers.insert(2, message_col)
+
+    sheet = _FakeSheet(rows=[rearranged_headers])
+    client = _make_client(sheet)
+
+    row_number = client.append_record(_sample_record("rec-map"))
+
+    assert row_number == 2
+    assert len(sheet.update_calls) == 1
+    update_row = sheet.update_calls[0]["values"][0]
+
+    message_index = rearranged_headers.index("Message")
+    pipeline_index = rearranged_headers.index("Pipeline Version")
+    assert update_row[message_index] == "Cannot log in"
+    assert update_row[pipeline_index] == "1.1.0"

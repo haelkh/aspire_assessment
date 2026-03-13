@@ -1,76 +1,135 @@
+/**
+ * ArcVault Triage Console - Application Logic
+ * ============================================
+ */
+
+// ============================================
+// State Management
+// ============================================
 const state = {
   samples: [],
   selectedSampleId: null,
 };
 
-const sourceInput = document.getElementById("source");
-const messageInput = document.getElementById("message");
-const requestIdInput = document.getElementById("request-id");
-const externalIdInput = document.getElementById("external-id");
-const customerIdInput = document.getElementById("customer-id");
-const receivedAtInput = document.getElementById("received-at");
-const channelMetadataInput = document.getElementById("channel-metadata");
+// ============================================
+// DOM Elements
+// ============================================
+const elements = {
+  // Form Inputs
+  source: document.getElementById("source"),
+  message: document.getElementById("message"),
+  requestId: document.getElementById("request-id"),
+  externalId: document.getElementById("external-id"),
+  customerId: document.getElementById("customer-id"),
+  receivedAt: document.getElementById("received-at"),
+  channelMetadata: document.getElementById("channel-metadata"),
 
-const sampleButtonsEl = document.getElementById("sample-buttons");
-const samplePreviewEl = document.getElementById("sample-preview");
-const statusLineEl = document.getElementById("status-line");
+  // Sample Elements
+  sampleButtons: document.getElementById("sample-buttons"),
+  samplePreview: document.getElementById("sample-preview"),
 
-const metricCategoryEl = document.getElementById("metric-category");
-const metricPriorityEl = document.getElementById("metric-priority");
-const metricQueueEl = document.getElementById("metric-queue");
-const metricConfidenceEl = document.getElementById("metric-confidence");
-const metricConfidenceLevelEl = document.getElementById("metric-confidence-level");
-const metricConfidenceSourceEl = document.getElementById("metric-confidence-source");
-const confidenceBarEl = document.getElementById("confidence-bar");
-const summaryTextEl = document.getElementById("summary-text");
-const rulesListEl = document.getElementById("rules-list");
-const evidenceListEl = document.getElementById("evidence-list");
-const jsonOutputEl = document.getElementById("json-output");
+  // Status
+  statusLine: document.getElementById("status-line"),
 
-const escalationBannerEl = document.getElementById("escalation-banner");
-const escalationReasonEl = document.getElementById("escalation-reason");
-const errorBannerEl = document.getElementById("error-banner");
-const errorReasonEl = document.getElementById("error-reason");
+  // Metrics
+  metricCategory: document.getElementById("metric-category"),
+  metricPriority: document.getElementById("metric-priority"),
+  metricQueue: document.getElementById("metric-queue"),
+  metricConfidence: document.getElementById("metric-confidence"),
+  metricConfidenceLevel: document.getElementById("metric-confidence-level"),
+  metricConfidenceSource: document.getElementById("metric-confidence-source"),
+  confidenceBar: document.getElementById("confidence-bar"),
 
-const batchBodyEl = document.getElementById("batch-body");
-const batchBtn = document.getElementById("btn-batch");
-const processBtn = document.getElementById("btn-process");
+  // Results
+  summaryText: document.getElementById("summary-text"),
+  rulesList: document.getElementById("rules-list"),
+  evidenceList: document.getElementById("evidence-list"),
+  jsonOutput: document.getElementById("json-output"),
 
-const aiAlertsCardEl = document.getElementById("ai-alerts-card");
-const aiAlertsListEl = document.getElementById("ai-alerts-list");
+  // Banners
+  escalationBanner: document.getElementById("escalation-banner"),
+  escalationReason: document.getElementById("escalation-reason"),
+  errorBanner: document.getElementById("error-banner"),
+  errorReason: document.getElementById("error-reason"),
 
+  // AI Alerts
+  aiAlertsCard: document.getElementById("ai-alerts-card"),
+  aiAlertsList: document.getElementById("ai-alerts-list"),
+
+  // Batch
+  batchBody: document.getElementById("batch-body"),
+  batchBtn: document.getElementById("btn-batch"),
+  processBtn: document.getElementById("btn-process"),
+
+  // Tabs
+  tabIntake: document.getElementById("tab-intake"),
+  tabBatch: document.getElementById("tab-batch"),
+  viewIntake: document.getElementById("view-intake"),
+  viewBatch: document.getElementById("view-batch"),
+};
+
+// ============================================
+// Utility Functions
+// ============================================
+
+/**
+ * Sets the status message
+ */
 function setStatus(message, isError = false) {
-  statusLineEl.textContent = message;
-  statusLineEl.classList.toggle("error", isError);
+  const statusSpan = elements.statusLine.querySelector("span");
+  if (statusSpan) {
+    statusSpan.textContent = message;
+  }
+  elements.statusLine.classList.toggle("error", isError);
 }
 
-function setTab(tabName) {
-  const intakeTab = document.getElementById("tab-intake");
-  const batchTab = document.getElementById("tab-batch");
-  const intakeView = document.getElementById("view-intake");
-  const batchView = document.getElementById("view-batch");
+/**
+ * Builds a user-facing status line for processing + Sheets outcomes.
+ */
+function buildProcessingStatus(result) {
+  if (result.idempotent_replay) {
+    return "Processed as idempotent replay; no new Sheets row was written. Change Request ID (or message) for a fresh row.";
+  }
 
+  if (result.sheets_saved === true) {
+    return "Processed successfully. Google Sheets row saved.";
+  }
+
+  const sheetsError = result.sheets_error
+    ? ` Sheets error: ${result.sheets_error}`
+    : "";
+  return `Processed, but Google Sheets write failed.${sheetsError}`;
+}
+
+/**
+ * Switches between tabs
+ */
+function setTab(tabName) {
   if (tabName === "batch") {
-    intakeTab.classList.remove("active");
-    batchTab.classList.add("active");
-    intakeView.classList.remove("active");
-    batchView.classList.add("active");
+    elements.tabIntake.classList.remove("active");
+    elements.tabBatch.classList.add("active");
+    elements.viewIntake.classList.remove("active");
+    elements.viewBatch.classList.add("active");
   } else {
-    batchTab.classList.remove("active");
-    intakeTab.classList.add("active");
-    batchView.classList.remove("active");
-    intakeView.classList.add("active");
+    elements.tabBatch.classList.remove("active");
+    elements.tabIntake.classList.add("active");
+    elements.viewBatch.classList.remove("active");
+    elements.viewIntake.classList.add("active");
   }
 }
 
+/**
+ * Formats a number as a percentage
+ */
 function asPercent(value) {
   const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return "-";
-  }
+  if (!Number.isFinite(num)) return "-";
   return `${(num * 100).toFixed(1)}%`;
 }
 
+/**
+ * Escapes HTML special characters
+ */
 function escapeHtml(raw) {
   const text = String(raw ?? "");
   return text
@@ -81,6 +140,9 @@ function escapeHtml(raw) {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * Returns placeholder text based on source type
+ */
 function getSourcePlaceholder(source) {
   if (source === "Email") {
     return "Subject: Login blocked for multiple users\n\nHi support,\nWe started seeing 403 errors after the latest update...";
@@ -91,29 +153,99 @@ function getSourcePlaceholder(source) {
   return "Ticket #SP-2001\nSeverity: High\nDescription: Invoice mismatch between contract and charged amount...";
 }
 
+/**
+ * Updates the message placeholder based on source
+ */
 function applySourcePlaceholder() {
-  messageInput.placeholder = getSourcePlaceholder(sourceInput.value);
+  elements.message.placeholder = getSourcePlaceholder(elements.source.value);
 }
 
+/**
+ * Determines confidence level from score
+ */
+function confidenceLevel(confidence) {
+  if (confidence >= 0.85) return "High";
+  if (confidence >= 0.7) return "Medium";
+  return "Low";
+}
+
+/**
+ * Returns CSS class for confidence badge
+ */
+function confidenceBadgeClass(level) {
+  if (level === "High") return "high";
+  if (level === "Medium") return "medium";
+  if (level === "Low") return "low";
+  return "neutral";
+}
+
+/**
+ * Formats confidence source for display
+ */
+function formatConfidenceSource(source) {
+  if (source === "model") return "Model";
+  if (source === "fallback") return "Fallback";
+  return "-";
+}
+
+/**
+ * Sets the confidence badge styling
+ */
+function setConfidenceBadge(level) {
+  elements.metricConfidenceLevel.textContent = level || "-";
+  elements.metricConfidenceLevel.className = `confidence-badge ${confidenceBadgeClass(level)}`;
+}
+
+/**
+ * Triggers animation restart on an element
+ */
+function retriggerAnimation(element, className) {
+  if (!element) return;
+  element.classList.remove(className);
+  void element.offsetWidth; // Force reflow
+  element.classList.add(className);
+}
+
+/**
+ * Triggers the result refresh animation
+ */
+function triggerResultRefresh() {
+  const outputPane = document.querySelector(".panel-output");
+  retriggerAnimation(outputPane, "result-refresh");
+}
+
+// ============================================
+// Sample Rendering
+// ============================================
+
+/**
+ * Renders the sample selection buttons
+ */
 function renderSampleButtons() {
-  sampleButtonsEl.innerHTML = "";
+  elements.sampleButtons.innerHTML = "";
+
   state.samples.forEach((sample) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "sample-btn";
-    button.textContent = `#${sample.id} ${sample.source}`;
     if (sample.id === state.selectedSampleId) {
       button.classList.add("active");
     }
+    button.textContent = `#${sample.id} ${sample.source}`;
+
     button.addEventListener("click", () => {
       state.selectedSampleId = sample.id;
       renderSampleButtons();
       applySample(sample);
     });
-    sampleButtonsEl.appendChild(button);
+
+    elements.sampleButtons.appendChild(button);
   });
 }
 
+/**
+ * Renders email sample preview
+ */
 function renderEmailPreview(payload) {
   return `
     <div class="sample-email">
@@ -127,6 +259,9 @@ function renderEmailPreview(payload) {
   `;
 }
 
+/**
+ * Renders web form sample preview
+ */
 function renderWebFormPreview(payload) {
   return `
     <div class="sample-web-form">
@@ -160,6 +295,9 @@ function renderWebFormPreview(payload) {
   `;
 }
 
+/**
+ * Renders support portal sample preview
+ */
 function renderPortalPreview(payload) {
   const tags = Array.isArray(payload.tags) ? payload.tags.join(", ") : "-";
   return `
@@ -176,38 +314,48 @@ function renderPortalPreview(payload) {
   `;
 }
 
+/**
+ * Renders the sample preview based on type
+ */
 function renderSamplePreview(sample = null) {
   if (!sample) {
-    samplePreviewEl.innerHTML = `<p class="sample-empty">Choose a sample to preview realistic channel format.</p>`;
+    elements.samplePreview.innerHTML = `<p class="empty-state">Choose a sample to preview realistic channel format.</p>`;
     return;
   }
 
   if (sample.source === "Email" && sample.email_payload) {
-    samplePreviewEl.innerHTML = renderEmailPreview(sample.email_payload);
+    elements.samplePreview.innerHTML = renderEmailPreview(sample.email_payload);
     return;
   }
   if (sample.source === "Web Form" && sample.web_form_payload) {
-    samplePreviewEl.innerHTML = renderWebFormPreview(sample.web_form_payload);
+    elements.samplePreview.innerHTML = renderWebFormPreview(
+      sample.web_form_payload,
+    );
     return;
   }
   if (sample.source === "Support Portal" && sample.portal_payload) {
-    samplePreviewEl.innerHTML = renderPortalPreview(sample.portal_payload);
+    elements.samplePreview.innerHTML = renderPortalPreview(
+      sample.portal_payload,
+    );
     return;
   }
 
-  samplePreviewEl.innerHTML = `<p class="sample-empty">${escapeHtml(sample.message || "")}</p>`;
+  elements.samplePreview.innerHTML = `<p class="empty-state">${escapeHtml(sample.message || "")}</p>`;
 }
 
+/**
+ * Applies a sample to the form
+ */
 function applySample(sample) {
-  sourceInput.value = sample.source || "Email";
-  messageInput.value = sample.message || "";
+  elements.source.value = sample.source || "Email";
+  elements.message.value = sample.message || "";
 
   const prefill = sample.prefill || {};
-  requestIdInput.value = prefill.request_id || "";
-  externalIdInput.value = prefill.external_id || "";
-  customerIdInput.value = prefill.customer_id || "";
-  receivedAtInput.value = prefill.received_at || "";
-  channelMetadataInput.value = prefill.channel_metadata
+  elements.requestId.value = prefill.request_id || "";
+  elements.externalId.value = prefill.external_id || "";
+  elements.customerId.value = prefill.customer_id || "";
+  elements.receivedAt.value = prefill.received_at || "";
+  elements.channelMetadata.value = prefill.channel_metadata
     ? JSON.stringify(prefill.channel_metadata, null, 2)
     : "";
 
@@ -215,32 +363,44 @@ function applySample(sample) {
   renderSamplePreview(sample);
 }
 
+// ============================================
+// Result Panel Management
+// ============================================
+
+/**
+ * Resets the result panel to initial state
+ */
 function resetResultPanel() {
-  metricCategoryEl.textContent = "-";
-  metricPriorityEl.textContent = "-";
-  metricQueueEl.textContent = "-";
-  metricConfidenceEl.textContent = "-";
+  elements.metricCategory.textContent = "-";
+  elements.metricPriority.textContent = "-";
+  elements.metricQueue.textContent = "-";
+  elements.metricConfidence.textContent = "-";
   setConfidenceBadge(null);
-  metricConfidenceSourceEl.textContent = "-";
-  confidenceBarEl.style.width = "0%";
-  summaryTextEl.textContent = "Submit a request to see a human-readable summary.";
-  rulesListEl.innerHTML = "";
-  evidenceListEl.innerHTML = "";
-  jsonOutputEl.textContent = "{}";
-  escalationBannerEl.classList.add("hidden");
-  errorBannerEl.classList.add("hidden");
-  errorReasonEl.textContent = "-";
-  aiAlertsCardEl.classList.add("hidden");
-  aiAlertsListEl.innerHTML = "";
+  elements.metricConfidenceSource.textContent = "-";
+  elements.confidenceBar.style.width = "0%";
+  elements.summaryText.textContent =
+    "Submit a request to see a human-readable summary.";
+  elements.rulesList.innerHTML = "";
+  elements.evidenceList.innerHTML = "";
+  elements.jsonOutput.textContent = "{}";
+  elements.escalationBanner.classList.add("hidden");
+  elements.errorBanner.classList.add("hidden");
+  elements.errorReason.textContent = "-";
+  elements.aiAlertsCard.classList.add("hidden");
+  elements.aiAlertsList.innerHTML = "";
 }
 
+/**
+ * Renders escalation rules as chips
+ */
 function renderRules(rules) {
-  rulesListEl.innerHTML = "";
+  elements.rulesList.innerHTML = "";
+
   if (!Array.isArray(rules) || rules.length === 0) {
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.textContent = "none";
-    rulesListEl.appendChild(chip);
+    elements.rulesList.appendChild(chip);
     return;
   }
 
@@ -248,144 +408,133 @@ function renderRules(rules) {
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.textContent = rule;
-    rulesListEl.appendChild(chip);
+    elements.rulesList.appendChild(chip);
   });
 }
 
+/**
+ * Renders evidence list items
+ */
 function renderEvidence(evidence) {
-  evidenceListEl.innerHTML = "";
+  elements.evidenceList.innerHTML = "";
+
   if (!Array.isArray(evidence) || evidence.length === 0) {
     const item = document.createElement("li");
     item.textContent = "No rule evidence for this request.";
-    evidenceListEl.appendChild(item);
+    elements.evidenceList.appendChild(item);
     return;
   }
 
   evidence.forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
-    evidenceListEl.appendChild(item);
+    elements.evidenceList.appendChild(item);
   });
 }
 
-function confidenceColor(confidence) {
-  if (confidence >= 0.85) {
-    return "#2dd4bf";
-  }
-  if (confidence >= 0.7) {
-    return "#f7b267";
-  }
-  return "#ff6b6b";
-}
-
-function confidenceLevel(confidence) {
-  if (confidence >= 0.85) {
-    return "High";
-  }
-  if (confidence >= 0.7) {
-    return "Medium";
-  }
-  return "Low";
-}
-
-function confidenceBadgeClass(level) {
-  if (level === "High") return "high";
-  if (level === "Medium") return "medium";
-  if (level === "Low") return "low";
-  return "neutral";
-}
-
-function formatConfidenceSource(source) {
-  if (source === "model") return "Model";
-  if (source === "fallback") return "Fallback";
-  return "-";
-}
-
-function setConfidenceBadge(level) {
-  metricConfidenceLevelEl.textContent = level || "-";
-  metricConfidenceLevelEl.className = `confidence-badge ${confidenceBadgeClass(level)}`;
-}
-
-function retriggerAnimation(element, className) {
-  if (!element) return;
-  element.classList.remove(className);
-  void element.offsetWidth;
-  element.classList.add(className);
-}
-
-function triggerResultRefresh() {
-  retriggerAnimation(document.querySelector(".pane-output"), "result-refresh");
-}
-
+/**
+ * Renders the complete result from API response
+ */
 function renderResult(result) {
   const confidence = Number(result.confidence);
-  const confidenceSafe = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
+  const confidenceSafe = Number.isFinite(confidence)
+    ? Math.max(0, Math.min(1, confidence))
+    : 0;
   const confidencePct = confidenceSafe * 100;
   const level = result.confidence_level || confidenceLevel(confidenceSafe);
   const source = formatConfidenceSource(result.confidence_source);
 
-  metricCategoryEl.textContent = result.category || "-";
-  metricPriorityEl.textContent = result.priority || "-";
-  metricQueueEl.textContent = result.destination_queue || "-";
-  metricConfidenceEl.textContent = asPercent(confidenceSafe);
+  // Update metrics
+  elements.metricCategory.textContent = result.category || "-";
+  elements.metricPriority.textContent = result.priority || "-";
+  elements.metricQueue.textContent = result.destination_queue || "-";
+  elements.metricConfidence.textContent = asPercent(confidenceSafe);
   setConfidenceBadge(level);
-  metricConfidenceSourceEl.textContent = source;
-  confidenceBarEl.style.width = `${Math.max(0, Math.min(100, confidencePct))}%`;
-  confidenceBarEl.style.background = confidenceColor(confidenceSafe);
+  elements.metricConfidenceSource.textContent = source;
 
-  summaryTextEl.textContent = result.human_summary || "No summary returned.";
+  // Animate confidence bar
+  elements.confidenceBar.style.width = `${Math.max(0, Math.min(100, confidencePct))}%`;
+
+  // Update result cards
+  elements.summaryText.textContent =
+    result.human_summary || "No summary returned.";
   renderRules(result.escalation_rules_triggered);
   renderEvidence(result.escalation_rule_evidence);
-  errorBannerEl.classList.add("hidden");
-  errorReasonEl.textContent = "-";
 
+  // Clear error state
+  elements.errorBanner.classList.add("hidden");
+  elements.errorReason.textContent = "-";
+
+  // Handle AI alerts
   const aiFlags = [
     ...(result.classification_guardrail_flags || []),
     ...(result.enrichment_guardrail_flags || []),
   ];
 
   if (aiFlags.length > 0) {
-    aiAlertsCardEl.classList.remove("hidden");
-    aiAlertsListEl.innerHTML = "";
+    elements.aiAlertsCard.classList.remove("hidden");
+    elements.aiAlertsList.innerHTML = "";
     aiFlags.forEach((flag) => {
       const chip = document.createElement("span");
       chip.className = "chip error";
       chip.textContent = flag;
-      aiAlertsListEl.appendChild(chip);
+      elements.aiAlertsList.appendChild(chip);
     });
   } else {
-    aiAlertsCardEl.classList.add("hidden");
+    elements.aiAlertsCard.classList.add("hidden");
   }
 
+  // Handle escalation banner
   if (result.escalation_flag) {
-    escalationBannerEl.classList.remove("hidden");
-    escalationReasonEl.textContent = result.escalation_reason || "Escalation required.";
+    elements.escalationBanner.classList.remove("hidden");
+    elements.escalationReason.textContent =
+      result.escalation_reason || "Escalation required.";
   } else {
-    escalationBannerEl.classList.add("hidden");
+    elements.escalationBanner.classList.add("hidden");
   }
 
-  jsonOutputEl.textContent = JSON.stringify(result, null, 2);
+  // Update JSON output
+  elements.jsonOutput.textContent = JSON.stringify(result, null, 2);
+
+  // Trigger animation
   triggerResultRefresh();
 }
 
+/**
+ * Renders a processing error
+ */
 function renderProcessingError(message) {
   resetResultPanel();
-  errorReasonEl.textContent = message || "Request failed.";
-  errorBannerEl.classList.remove("hidden");
-  aiAlertsCardEl.classList.add("hidden");
-  aiAlertsListEl.innerHTML = "";
-  jsonOutputEl.textContent = JSON.stringify({ error: message || "Request failed." }, null, 2);
+  elements.errorReason.textContent = message || "Request failed.";
+  elements.errorBanner.classList.remove("hidden");
+  elements.aiAlertsCard.classList.add("hidden");
+  elements.aiAlertsList.innerHTML = "";
+  elements.jsonOutput.textContent = JSON.stringify(
+    { error: message || "Request failed." },
+    null,
+    2,
+  );
   triggerResultRefresh();
 }
 
+// ============================================
+// Form Handling
+// ============================================
+
+/**
+ * Parses channel metadata JSON
+ */
 function parseChannelMetadata() {
-  const raw = channelMetadataInput.value.trim();
-  if (!raw) {
-    return null;
-  }
+  const raw = elements.channelMetadata.value.trim();
+  if (!raw) return null;
+
   try {
     const parsed = JSON.parse(raw);
-    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    if (
+      parsed === null ||
+      Array.isArray(parsed) ||
+      typeof parsed !== "object"
+    ) {
       throw new Error("Channel metadata must be a JSON object.");
     }
     return parsed;
@@ -394,16 +543,19 @@ function parseChannelMetadata() {
   }
 }
 
+/**
+ * Builds the request payload from form data
+ */
 function buildPayload() {
   const payload = {
-    source: sourceInput.value,
-    message: messageInput.value,
+    source: elements.source.value,
+    message: elements.message.value,
   };
 
-  const requestId = requestIdInput.value.trim();
-  const externalId = externalIdInput.value.trim();
-  const customerId = customerIdInput.value.trim();
-  const receivedAt = receivedAtInput.value.trim();
+  const requestId = elements.requestId.value.trim();
+  const externalId = elements.externalId.value.trim();
+  const customerId = elements.customerId.value.trim();
+  const receivedAt = elements.receivedAt.value.trim();
 
   if (requestId) payload.request_id = requestId;
   if (externalId) payload.external_id = externalId;
@@ -418,10 +570,13 @@ function buildPayload() {
   return payload;
 }
 
+/**
+ * Handles form submission
+ */
 async function processRequest(event) {
   event.preventDefault();
   setStatus("Processing...");
-  processBtn.disabled = true;
+  elements.processBtn.disabled = true;
 
   try {
     const payload = buildPayload();
@@ -438,25 +593,30 @@ async function processRequest(event) {
     }
 
     renderResult(data);
-    const replay = data.idempotent_replay ? " (idempotent replay)" : "";
-    setStatus(`Processed successfully${replay}.`);
+    const statusMessage = buildProcessingStatus(data);
+    const hasSheetsFailure = !data.idempotent_replay && data.sheets_saved === false;
+    setStatus(statusMessage, hasSheetsFailure);
   } catch (error) {
     renderProcessingError(error.message || "Failed to process request.");
     setStatus(error.message || "Failed to process request.", true);
   } finally {
-    processBtn.disabled = false;
+    elements.processBtn.disabled = false;
   }
 }
 
+/**
+ * Clears the form
+ */
 function clearForm() {
-  sourceInput.value = "Email";
-  messageInput.value = "";
-  requestIdInput.value = "";
-  externalIdInput.value = "";
-  customerIdInput.value = "";
-  receivedAtInput.value = "";
-  channelMetadataInput.value = "";
+  elements.source.value = "Email";
+  elements.message.value = "";
+  elements.requestId.value = "";
+  elements.externalId.value = "";
+  elements.customerId.value = "";
+  elements.receivedAt.value = "";
+  elements.channelMetadata.value = "";
   state.selectedSampleId = null;
+
   renderSampleButtons();
   renderSamplePreview(null);
   applySourcePlaceholder();
@@ -464,36 +624,49 @@ function clearForm() {
   setStatus("Form cleared.");
 }
 
+// ============================================
+// Batch Processing
+// ============================================
+
+/**
+ * Renders batch results in the table
+ */
 function renderBatchRows(records) {
-  batchBodyEl.innerHTML = "";
+  elements.batchBody.innerHTML = "";
 
   if (!Array.isArray(records) || records.length === 0) {
-    batchBodyEl.innerHTML = `<tr><td colspan="8" class="muted-row">No batch records returned.</td></tr>`;
+    elements.batchBody.innerHTML = `<tr><td colspan="8" class="empty-row">No batch records returned.</td></tr>`;
     return;
   }
 
   records.forEach((record) => {
+    const row = document.createElement("tr");
+
     if (record.error) {
-      const row = document.createElement("tr");
       row.innerHTML = `
         <td>${escapeHtml(record.sample_id ?? "-")}</td>
         <td>${escapeHtml(record.source ?? "-")}</td>
         <td colspan="6">${escapeHtml(record.error)}</td>
       `;
-      batchBodyEl.appendChild(row);
+      elements.batchBody.appendChild(row);
       return;
     }
 
     const escalatedBadge = record.escalation_flag
       ? `<span class="badge yes">YES</span>`
       : `<span class="badge no">NO</span>`;
+
     const replayBadge = record.idempotent_replay
       ? `<span class="badge replay">Replay</span>`
       : `<span class="badge no">Fresh</span>`;
+
     const confidence = Number(record.confidence);
-    const confidenceSafe = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
+    const confidenceSafe = Number.isFinite(confidence)
+      ? Math.max(0, Math.min(1, confidence))
+      : 0;
     const level = record.confidence_level || confidenceLevel(confidenceSafe);
     const source = formatConfidenceSource(record.confidence_source);
+
     const confidenceCell = `
       <div class="batch-confidence">
         <strong>${escapeHtml(asPercent(confidenceSafe))}</strong>
@@ -501,7 +674,6 @@ function renderBatchRows(records) {
       </div>
     `;
 
-    const row = document.createElement("tr");
     row.innerHTML = `
       <td>${escapeHtml(record.sample_id ?? "-")}</td>
       <td>${escapeHtml(record.source ?? "-")}</td>
@@ -512,18 +684,23 @@ function renderBatchRows(records) {
       <td>${escalatedBadge}</td>
       <td>${replayBadge}</td>
     `;
-    batchBodyEl.appendChild(row);
+
+    elements.batchBody.appendChild(row);
   });
 }
 
+/**
+ * Runs batch processing
+ */
 async function runBatch() {
-  batchBtn.disabled = true;
-  batchBtn.textContent = "Running...";
+  elements.batchBtn.disabled = true;
+  elements.batchBtn.querySelector("span").textContent = "Running...";
   setStatus("Running batch QA...");
 
   try {
     const response = await fetch("/api/batch", { method: "POST" });
     const data = await response.json();
+
     if (!response.ok) {
       throw new Error(data?.detail || "Batch run failed.");
     }
@@ -533,11 +710,19 @@ async function runBatch() {
   } catch (error) {
     setStatus(error.message || "Batch run failed.", true);
   } finally {
-    batchBtn.disabled = false;
-    batchBtn.textContent = "Run Batch (All Samples)";
+    elements.batchBtn.disabled = false;
+    elements.batchBtn.querySelector("span").textContent =
+      "Run Batch (All Samples)";
   }
 }
 
+// ============================================
+// Initialization
+// ============================================
+
+/**
+ * Bootstraps the application
+ */
 async function bootstrap() {
   resetResultPanel();
   applySourcePlaceholder();
@@ -555,17 +740,33 @@ async function bootstrap() {
   }
 }
 
-document.getElementById("triage-form").addEventListener("submit", processRequest);
+// ============================================
+// Event Listeners
+// ============================================
+
+// Form events
+document
+  .getElementById("triage-form")
+  .addEventListener("submit", processRequest);
 document.getElementById("btn-clear").addEventListener("click", clearForm);
-document.getElementById("tab-intake").addEventListener("click", () => setTab("intake"));
-document.getElementById("tab-batch").addEventListener("click", () => setTab("batch"));
-batchBtn.addEventListener("click", runBatch);
-sourceInput.addEventListener("change", () => {
+
+// Tab events
+elements.tabIntake.addEventListener("click", () => setTab("intake"));
+elements.tabBatch.addEventListener("click", () => setTab("batch"));
+
+// Batch event
+elements.batchBtn.addEventListener("click", runBatch);
+
+// Source change event
+elements.source.addEventListener("change", () => {
   applySourcePlaceholder();
-  const selected = state.samples.find((sample) => sample.id === state.selectedSampleId);
+  const selected = state.samples.find(
+    (sample) => sample.id === state.selectedSampleId,
+  );
   if (selected) {
     renderSamplePreview(selected);
   }
 });
 
+// Initialize application
 bootstrap();

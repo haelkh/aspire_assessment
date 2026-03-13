@@ -453,6 +453,8 @@ def output_node(state: TriageState) -> Dict[str, Any]:
             **response_meta,
             "output_saved": False,
             "sheets_saved": False,
+            "sheets_status": "skipped:idempotent_replay",
+            "sheets_error": None,
             "duplicate": True,
         }
 
@@ -498,6 +500,8 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         sheets_client = get_sheets_client()
         sheets_client.append_record(record)
         sheets_success = True
+        sheets_error = None
+        sheets_status = "written"
     except Exception as exc:  # pragma: no cover - integration behavior
         _log_event(
             logging.WARNING,
@@ -507,6 +511,8 @@ def output_node(state: TriageState) -> Dict[str, Any]:
             error=str(exc),
         )
         sheets_success = False
+        sheets_error = str(exc)
+        sheets_status = "failed"
 
     _log_event(
         logging.INFO,
@@ -521,6 +527,8 @@ def output_node(state: TriageState) -> Dict[str, Any]:
         **response_meta,
         "output_saved": True,
         "sheets_saved": sheets_success,
+        "sheets_status": sheets_status,
+        "sheets_error": sheets_error,
     }
 
 

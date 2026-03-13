@@ -5,197 +5,628 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ArcVault Triage Console</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div class="bg-orb bg-orb-1"></div>
-    <div class="bg-orb bg-orb-2"></div>
-    <div class="bg-grid"></div>
+    <!-- Ambient Background -->
+    <div class="ambient-bg">
+      <div class="ambient-glow ambient-glow-1"></div>
+      <div class="ambient-glow ambient-glow-2"></div>
+      <div class="grid-overlay"></div>
+    </div>
 
-    <main class="app-shell">
-      <header class="hero card animate-rise">
-        <p class="eyebrow">ArcVault Operations Console</p>
-        <h1>Inbound Support Triage</h1>
-        <p class="hero-copy">
-          Native intake workspace for structured requests, reliable routing, and auditable
-          escalation decisions.
-        </p>
-        <div class="hero-pill-row">
-          <span class="pill">Input Contract</span>
-          <span class="pill">Replay Safety</span>
-          <span class="pill">Escalation Evidence</span>
-          <span class="pill">Confidence Transparency</span>
+    <main class="app-container">
+      <!-- Header -->
+      <header class="header animate-in">
+        <div class="header-content">
+          <div class="header-left">
+            <div class="logo">
+              <svg
+                class="logo-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+              <span class="logo-text">ArcVault</span>
+              <span class="logo-badge">Console</span>
+            </div>
+          </div>
+          <div class="header-center">
+            <h1 class="header-title">Inbound Support Triage</h1>
+            <p class="header-subtitle">
+              Structured intake, reliable routing, auditable decisions
+            </p>
+          </div>
+          <div class="header-right">
+            <div class="status-indicator">
+              <span class="status-dot"></span>
+              <span class="status-text">System Online</span>
+            </div>
+          </div>
+        </div>
+        <div class="header-tags">
+          <span class="tag">Input Contract</span>
+          <span class="tag">Replay Safety</span>
+          <span class="tag">Escalation Evidence</span>
+          <span class="tag">Confidence Transparency</span>
         </div>
       </header>
 
-      <nav class="tabs animate-rise delay-1" aria-label="Console views">
-        <button id="tab-intake" class="tab active" type="button">Intake</button>
-        <button id="tab-batch" class="tab" type="button">Batch QA</button>
+      <!-- Navigation Tabs -->
+      <nav class="tabs-container animate-in delay-1">
+        <div class="tabs">
+          <button id="tab-intake" class="tab active" type="button">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            <span>Intake</span>
+          </button>
+          <button id="tab-batch" class="tab" type="button">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            <span>Batch QA</span>
+          </button>
+        </div>
       </nav>
 
-      <section id="view-intake" class="view active animate-rise delay-2">
-        <div class="workspace-grid">
-          <section class="card pane pane-input">
-            <div class="pane-header">
-              <h2>Request Input</h2>
-              <p>Choose source, load a realistic sample, and submit for triage.</p>
+      <!-- Intake View -->
+      <section id="view-intake" class="view active animate-in delay-2">
+        <div class="workspace">
+          <!-- Input Panel -->
+          <section class="panel panel-input">
+            <div class="panel-header">
+              <div class="panel-title-row">
+                <svg
+                  class="panel-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                  />
+                  <path
+                    d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                  />
+                </svg>
+                <h2>Request Input</h2>
+              </div>
+              <p class="panel-description">
+                Choose source, load a sample, and submit for triage.
+              </p>
             </div>
 
-            <form id="triage-form" class="form-stack">
-              <div class="field-group">
-                <label for="source">Source</label>
-                <select id="source" name="source">
-                  <option>Email</option>
-                  <option>Web Form</option>
-                  <option>Support Portal</option>
-                </select>
+            <form id="triage-form" class="form">
+              <div class="form-group">
+                <label for="source">
+                  <svg
+                    class="label-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"
+                    />
+                    <polyline points="22,6 12,13 2,6" />
+                  </svg>
+                  Source
+                </label>
+                <div class="select-wrapper">
+                  <select id="source" name="source">
+                    <option>Email</option>
+                    <option>Web Form</option>
+                    <option>Support Portal</option>
+                  </select>
+                  <svg
+                    class="select-arrow"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </div>
               </div>
 
-              <div class="field-group">
-                <label for="message">Message</label>
+              <div class="form-group">
+                <label for="message">
+                  <svg
+                    class="label-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                    />
+                  </svg>
+                  Message
+                </label>
                 <textarea
                   id="message"
                   name="message"
-                  rows="8"
+                  rows="6"
                   placeholder="Paste inbound customer request..."
                 ></textarea>
               </div>
 
-              <details class="meta-panel">
-                <summary>Operational Metadata</summary>
-                <div class="meta-grid">
-                  <div class="field-group">
-                    <label for="request-id">Request ID</label>
-                    <input id="request-id" type="text" placeholder="REQ-1001" />
+              <details class="metadata-panel">
+                <summary>
+                  <svg
+                    class="summary-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span>Operational Metadata</span>
+                  <svg
+                    class="chevron"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </summary>
+                <div class="metadata-content">
+                  <div class="metadata-grid">
+                    <div class="form-group">
+                      <label for="request-id">Request ID</label>
+                      <input
+                        id="request-id"
+                        type="text"
+                        placeholder="REQ-1001"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label for="external-id">External ID</label>
+                      <input
+                        id="external-id"
+                        type="text"
+                        placeholder="MAIL-THREAD-123"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label for="customer-id">Customer ID</label>
+                      <input
+                        id="customer-id"
+                        type="text"
+                        placeholder="acme-corp"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label for="received-at">Received At (ISO-8601)</label>
+                      <input
+                        id="received-at"
+                        type="text"
+                        placeholder="2026-02-10T09:12:00-05:00"
+                      />
+                    </div>
                   </div>
-                  <div class="field-group">
-                    <label for="external-id">External ID</label>
-                    <input id="external-id" type="text" placeholder="MAIL-THREAD-123" />
+                  <div class="form-group full-width">
+                    <label for="channel-metadata"
+                      >Channel Metadata (JSON)</label
+                    >
+                    <textarea
+                      id="channel-metadata"
+                      rows="3"
+                      placeholder='{"mailbox":"support@arcvault.io","priority_flag":"normal"}'
+                    ></textarea>
                   </div>
-                  <div class="field-group">
-                    <label for="customer-id">Customer ID</label>
-                    <input id="customer-id" type="text" placeholder="acme-corp" />
-                  </div>
-                  <div class="field-group">
-                    <label for="received-at">Received At (ISO-8601)</label>
-                    <input
-                      id="received-at"
-                      type="text"
-                      placeholder="2026-02-10T09:12:00-05:00"
-                    />
-                  </div>
-                </div>
-                <div class="field-group">
-                  <label for="channel-metadata">Channel Metadata (JSON)</label>
-                  <textarea
-                    id="channel-metadata"
-                    rows="4"
-                    placeholder='{"mailbox":"support@arcvault.io","priority_flag":"normal"}'
-                  ></textarea>
                 </div>
               </details>
 
-              <div class="action-row">
+              <div class="form-actions">
                 <button id="btn-process" class="btn btn-primary" type="submit">
-                  Process Request
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  <span>Process Request</span>
                 </button>
-                <button id="btn-clear" class="btn btn-ghost" type="button">Clear</button>
+                <button id="btn-clear" class="btn btn-secondary" type="button">
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  </svg>
+                  <span>Clear</span>
+                </button>
               </div>
             </form>
 
-            <section class="sample-section">
-              <div class="sample-header-row">
-                <h3>Sample Inputs</h3>
-                <p>Formatted by channel, not plain strings.</p>
+            <!-- Sample Section -->
+            <div class="samples-section">
+              <div class="samples-header">
+                <h3>
+                  <svg
+                    class="section-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"
+                    />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  Sample Inputs
+                </h3>
+                <p>Formatted by channel</p>
               </div>
               <div id="sample-buttons" class="sample-buttons"></div>
-              <div id="sample-preview" class="sample-preview"></div>
-            </section>
+              <div id="sample-preview" class="sample-preview">
+                <p class="empty-state">
+                  Choose a sample to preview realistic channel format.
+                </p>
+              </div>
+            </div>
           </section>
 
-          <section class="card pane pane-output">
-            <div class="pane-header">
-              <h2>Decision Output</h2>
-              <p>Category, routing, escalation evidence, and confidence diagnostics.</p>
+          <!-- Output Panel -->
+          <section class="panel panel-output">
+            <div class="panel-header">
+              <div class="panel-title-row">
+                <svg
+                  class="panel-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                <h2>Decision Output</h2>
+              </div>
+              <p class="panel-description">
+                Category, routing, escalation evidence, and confidence
+                diagnostics.
+              </p>
             </div>
 
-            <div class="metric-grid">
-              <article class="metric-card">
-                <span class="metric-label">Category</span>
+            <!-- Metrics Grid -->
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-header">
+                  <svg
+                    class="metric-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                    />
+                  </svg>
+                  <span class="metric-label">Category</span>
+                </div>
                 <span id="metric-category" class="metric-value">-</span>
-              </article>
-              <article class="metric-card">
-                <span class="metric-label">Priority</span>
+              </div>
+              <div class="metric-card">
+                <div class="metric-header">
+                  <svg
+                    class="metric-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span class="metric-label">Priority</span>
+                </div>
                 <span id="metric-priority" class="metric-value">-</span>
-              </article>
-              <article class="metric-card">
-                <span class="metric-label">Final Queue</span>
+              </div>
+              <div class="metric-card">
+                <div class="metric-header">
+                  <svg
+                    class="metric-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  <span class="metric-label">Final Queue</span>
+                </div>
                 <span id="metric-queue" class="metric-value">-</span>
-              </article>
-              <article class="metric-card">
-                <span class="metric-label">Confidence</span>
+              </div>
+              <div class="metric-card metric-card-confidence">
+                <div class="metric-header">
+                  <svg
+                    class="metric-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M12 20V10" />
+                    <path d="M18 20V4" />
+                    <path d="M6 20v-4" />
+                  </svg>
+                  <span class="metric-label">Confidence</span>
+                </div>
                 <span id="metric-confidence" class="metric-value">-</span>
                 <div class="confidence-meta">
-                  <span id="metric-confidence-level" class="confidence-badge neutral">-</span>
-                  <span id="metric-confidence-source" class="confidence-source">-</span>
+                  <span
+                    id="metric-confidence-level"
+                    class="confidence-badge neutral"
+                    >-</span
+                  >
+                  <span id="metric-confidence-source" class="confidence-source"
+                    >-</span
+                  >
                 </div>
                 <div class="confidence-track">
                   <div id="confidence-bar" class="confidence-bar"></div>
                 </div>
-              </article>
+              </div>
             </div>
 
-            <div id="escalation-banner" class="escalation-banner hidden">
-              <strong>Escalated:</strong> <span id="escalation-reason">-</span>
+            <!-- Banners -->
+            <div id="escalation-banner" class="banner banner-escalation hidden">
+              <svg
+                class="banner-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <div class="banner-content">
+                <strong>Escalated</strong>
+                <span id="escalation-reason">-</span>
+              </div>
             </div>
 
-            <div id="error-banner" class="error-banner hidden">
-              <strong>Error:</strong> <span id="error-reason">-</span>
+            <div id="error-banner" class="banner banner-error hidden">
+              <svg
+                class="banner-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+              </svg>
+              <div class="banner-content">
+                <strong>Error</strong>
+                <span id="error-reason">-</span>
+              </div>
             </div>
 
-            <article class="result-card">
-              <h3>Operator Summary</h3>
-              <p id="summary-text">Submit a request to see a human-readable summary.</p>
-            </article>
+            <!-- Result Cards -->
+            <div class="result-cards">
+              <div class="result-card">
+                <h3>
+                  <svg
+                    class="card-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  Operator Summary
+                </h3>
+                <p id="summary-text">
+                  Submit a request to see a human-readable summary.
+                </p>
+              </div>
 
-            <article class="result-card">
-              <h3>Escalation Rules Triggered</h3>
-              <div id="rules-list" class="chip-list"></div>
-            </article>
+              <div class="result-card">
+                <h3>
+                  <svg
+                    class="card-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+                    />
+                    <line x1="4" y1="22" x2="4" y2="15" />
+                  </svg>
+                  Escalation Rules Triggered
+                </h3>
+                <div id="rules-list" class="chip-list"></div>
+              </div>
 
-            <article class="result-card">
-              <h3>Rule Evidence</h3>
-              <ul id="evidence-list" class="evidence-list"></ul>
-            </article>
+              <div class="result-card">
+                <h3>
+                  <svg
+                    class="card-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="9 11 12 14 22 4" />
+                    <path
+                      d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                    />
+                  </svg>
+                  Rule Evidence
+                </h3>
+                <ul id="evidence-list" class="evidence-list"></ul>
+              </div>
 
-            <article id="ai-alerts-card" class="result-card hidden">
-              <h3>AI System Alerts</h3>
-              <div id="ai-alerts-list" class="chip-list"></div>
-            </article>
+              <div
+                id="ai-alerts-card"
+                class="result-card result-card-alerts hidden"
+              >
+                <h3>
+                  <svg
+                    class="card-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  AI System Alerts
+                </h3>
+                <div id="ai-alerts-list" class="chip-list"></div>
+              </div>
 
-            <article class="result-card">
-              <h3>Structured Record</h3>
-              <pre id="json-output" class="json-output">{}</pre>
-            </article>
+              <div class="result-card result-card-json">
+                <h3>
+                  <svg
+                    class="card-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                  Structured Record
+                </h3>
+                <pre id="json-output" class="json-output">{}</pre>
+              </div>
+            </div>
 
-            <p id="status-line" class="status-line">Ready.</p>
+            <p id="status-line" class="status-line">
+              <svg
+                class="status-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              <span>Ready.</span>
+            </p>
           </section>
         </div>
       </section>
 
-      <section id="view-batch" class="view animate-rise delay-2">
-        <div class="card batch-pane">
-          <div class="pane-header">
-            <h2>Batch QA</h2>
-            <p>Run all configured samples to verify routing and escalation consistency.</p>
+      <!-- Batch View -->
+      <section id="view-batch" class="view animate-in delay-2">
+        <div class="batch-panel panel">
+          <div class="panel-header">
+            <div class="panel-title-row">
+              <svg
+                class="panel-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+              <h2>Batch QA</h2>
+            </div>
+            <p class="panel-description">
+              Run all configured samples to verify routing and escalation
+              consistency.
+            </p>
           </div>
 
-          <div class="action-row">
+          <div class="batch-actions">
             <button id="btn-batch" class="btn btn-primary" type="button">
-              Run Batch (All Samples)
+              <svg
+                class="btn-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              <span>Run Batch (All Samples)</span>
             </button>
           </div>
 
-          <div class="table-wrap">
+          <div class="table-container">
             <table id="batch-table">
               <thead>
                 <tr>
@@ -211,7 +642,7 @@
               </thead>
               <tbody id="batch-body">
                 <tr>
-                  <td colspan="8" class="muted-row">No batch run yet.</td>
+                  <td colspan="8" class="empty-row">No batch run yet.</td>
                 </tr>
               </tbody>
             </table>

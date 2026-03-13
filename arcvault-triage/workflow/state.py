@@ -134,3 +134,18 @@ class TriageState(TypedDict, total=False):
 
     processing_ms: float
     """End-to-end processing duration in milliseconds."""
+
+    output_saved: bool
+    """Whether local output persistence wrote a new JSONL row."""
+
+    sheets_saved: bool
+    """Whether a Google Sheets row was written for this run."""
+
+    sheets_status: str
+    """Sheets write state: written, failed, or skipped:idempotent_replay."""
+
+    sheets_error: Optional[str]
+    """Sheets write error message when sheets_status is failed."""
+
+    duplicate: bool
+    """True when request was treated as an idempotent replay."""
