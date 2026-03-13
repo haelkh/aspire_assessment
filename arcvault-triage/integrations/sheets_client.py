@@ -56,10 +56,18 @@ class SheetsClient:
                 If not provided, reads from GOOGLE_CREDENTIALS_PATH env var.
         """
         self.spreadsheet_id = spreadsheet_id or os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
-        self.credentials_path = credentials_path or os.getenv(
+        
+        env_cred_path = credentials_path or os.getenv(
             "GOOGLE_CREDENTIALS_PATH",
             "credentials/service_account.json"
         )
+        
+        # If relative, resolve it against the project root (parent of integrations/)
+        if not os.path.isabs(env_cred_path):
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.credentials_path = os.path.join(project_root, env_cred_path)
+        else:
+            self.credentials_path = env_cred_path
 
         if not self.spreadsheet_id:
             raise ValueError(
