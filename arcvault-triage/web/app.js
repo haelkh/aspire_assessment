@@ -95,10 +95,14 @@ function buildProcessingStatus(result) {
     return "Processed successfully. Google Sheets row saved.";
   }
 
+  if (result.sheets_status === "pending") {
+    return "Processed successfully. Google Sheets row is being saved in background.";
+  }
+
   const sheetsError = result.sheets_error
     ? ` Sheets error: ${result.sheets_error}`
     : "";
-  return `Processed, but Google Sheets write failed.${sheetsError}`;
+  return `Processed, but Google Sheets write was skipped or failed.${sheetsError}`;
 }
 
 /**
@@ -586,7 +590,15 @@ async function processRequest(event) {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    let data;
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(text || `Server returned ${response.status} ${response.statusText}`);
+    }
+
     if (!response.ok) {
       const detail = data?.detail || "Request failed.";
       throw new Error(detail);
@@ -597,6 +609,7 @@ async function processRequest(event) {
     const hasSheetsFailure = !data.idempotent_replay && data.sheets_saved === false;
     setStatus(statusMessage, hasSheetsFailure);
   } catch (error) {
+    console.error("Processing error:", error);
     renderProcessingError(error.message || "Failed to process request.");
     setStatus(error.message || "Failed to process request.", true);
   } finally {
@@ -699,7 +712,15 @@ async function runBatch() {
 
   try {
     const response = await fetch("/api/batch", { method: "POST" });
-    const data = await response.json();
+    
+    let data;
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(text || `Batch run failed unitially (HTTP ${response.status})`);
+    }
 
     if (!response.ok) {
       throw new Error(data?.detail || "Batch run failed.");
@@ -708,6 +729,7 @@ async function runBatch() {
     renderBatchRows(data.records);
     setStatus(`Batch complete: ${data.count} samples processed.`);
   } catch (error) {
+    console.error("Batch error:", error);
     setStatus(error.message || "Batch run failed.", true);
   } finally {
     elements.batchBtn.disabled = false;

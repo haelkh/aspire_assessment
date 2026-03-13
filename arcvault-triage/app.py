@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, field_validator
 load_dotenv()
 
 from workflow.graph import process_message
+from workflow.nodes import background_sheets_write
 
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def get_samples() -> Dict[str, Any]:
 
 
 @app.post("/api/triage")
-def triage(payload: TriageRequest) -> Dict[str, Any]:
+def triage(payload: TriageRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Process one message through the triage workflow."""
     metadata = _build_metadata(payload)
     try:
@@ -146,6 +147,16 @@ def triage(payload: TriageRequest) -> Dict[str, Any]:
             logger.exception("Triage processing failed")
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
+    # Queue Google Sheets write in background if record exists
+    record = result.pop("record", None)
+    if record and not result.get("idempotent_replay"):
+        background_tasks.add_task(background_sheets_write, record)
+        result["sheets_saved"] = None  # Pending
+        result["sheets_status"] = "pending"
+    else:
+        result["sheets_saved"] = False
+        result["sheets_status"] = "skipped"
+
     result["request_id"] = metadata["request_id"]
     result["external_id"] = payload.external_id
     result["customer_id"] = payload.customer_id
@@ -155,7 +166,7 @@ def triage(payload: TriageRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/batch")
-def batch_run() -> Dict[str, Any]:
+def batch_run(background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Run triage against all configured samples and return concise results."""
     records: list[Dict[str, Any]] = []
     for sample in SAMPLES:
@@ -166,6 +177,12 @@ def batch_run() -> Dict[str, Any]:
                 source=sample.get("source", "Email"),
                 metadata=metadata,
             )
+            
+            # Queue Google Sheets write in background if record exists
+            record = result.pop("record", None)
+            if record and not result.get("idempotent_replay"):
+                background_tasks.add_task(background_sheets_write, record)
+
             records.append(
                 {
                     "sample_id": sample.get("id"),

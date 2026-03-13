@@ -408,10 +408,7 @@ def output_node(state: TriageState) -> Dict[str, Any]:
 
     This node writes:
     - Local JSONL runtime log (append-only, replay-safe)
-    - Google Sheets row (if configured)
     """
-    from integrations.sheets_client import get_sheets_client
-
     timestamp = datetime.now().isoformat()
     request_id = state.get("request_id") or state.get("external_id")
     dedup_key = _build_dedup_key(
@@ -496,24 +493,6 @@ def output_node(state: TriageState) -> Dict[str, Any]:
 
     append_record_jsonl(record)
 
-    try:
-        sheets_client = get_sheets_client()
-        sheets_client.append_record(record)
-        sheets_success = True
-        sheets_error = None
-        sheets_status = "written"
-    except Exception as exc:  # pragma: no cover - integration behavior
-        _log_event(
-            logging.WARNING,
-            "sheets_write_failed",
-            ingestion_id=ingestion_id,
-            record_id=record_id,
-            error=str(exc),
-        )
-        sheets_success = False
-        sheets_error = str(exc)
-        sheets_status = "failed"
-
     _log_event(
         logging.INFO,
         "record_persisted",
@@ -526,10 +505,34 @@ def output_node(state: TriageState) -> Dict[str, Any]:
     return {
         **response_meta,
         "output_saved": True,
-        "sheets_saved": sheets_success,
-        "sheets_status": sheets_status,
-        "sheets_error": sheets_error,
+        "record": record,  # Include record for background tasks
     }
+
+
+def background_sheets_write(record: Dict[str, Any]) -> None:
+    """Perform Google Sheets write in the background."""
+    from integrations.sheets_client import get_sheets_client
+    
+    ingestion_id = record.get("ingestion_id")
+    record_id = record.get("record_id")
+    
+    try:
+        sheets_client = get_sheets_client()
+        sheets_client.append_record(record)
+        _log_event(
+            logging.INFO,
+            "sheets_write_success",
+            ingestion_id=ingestion_id,
+            record_id=record_id,
+        )
+    except Exception as exc:
+        _log_event(
+            logging.WARNING,
+            "sheets_write_failed",
+            ingestion_id=ingestion_id,
+            record_id=record_id,
+            error=str(exc),
+        )
 
 
 def escalate_node(state: TriageState) -> Dict[str, Any]:
